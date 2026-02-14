@@ -3,17 +3,21 @@ import * as THREE from 'three';
 import { Canvas, useFrame, ThreeEvent } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { VoxelField } from '@/lib/soil/VoxelField';
+import { SoilSimulator } from '@/lib/soil/soilSim';
 import { soilVertexShader, soilFragmentShader } from '@/lib/soil/soilShader';
-import { DIG_RADIUS } from '@/lib/soil/constants';
+import { DIG_RADIUS, SIM_ITERATIONS_PER_FRAME } from '@/lib/soil/constants';
 
-interface SoilStats {
+export interface SoilStats {
   vertices: number;
   triangles: number;
+  simActive: boolean;
 }
 
 function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
   const meshRef = useRef<THREE.Mesh>(null!);
   const fieldRef = useRef<VoxelField | null>(null);
+  const simRef = useRef<SoilSimulator | null>(null);
+  const meshFrameRef = useRef(0);
 
   const material = useMemo(() => new THREE.ShaderMaterial({
     vertexShader: soilVertexShader,
@@ -42,13 +46,18 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
     geom.computeBoundingSphere();
     mesh.geometry = geom;
 
-    onStats({ vertices: data.positions.length / 3, triangles: data.indices.length / 3 });
+    onStats({
+      vertices: data.positions.length / 3,
+      triangles: data.indices.length / 3,
+      simActive: simRef.current?.simActive ?? false,
+    });
   }, [onStats]);
 
   useEffect(() => {
     const field = new VoxelField();
     field.initTerrain();
     fieldRef.current = field;
+    simRef.current = new SoilSimulator(field);
     rebuildMesh();
   }, [rebuildMesh]);
 
@@ -60,10 +69,32 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
     const digPoint = e.point.clone().addScaledVector(normal, -DIG_RADIUS * 0.4);
     fieldRef.current.applyStamp(digPoint.x, digPoint.y, digPoint.z, DIG_RADIUS);
     rebuildMesh();
+    simRef.current?.activate();
   }, [rebuildMesh]);
 
   useFrame((_, dt) => {
     material.uniforms.uTime.value += dt;
+
+    const sim = simRef.current;
+    if (sim && sim.simActive) {
+      const clampedDt = Math.min(dt, 1 / 30);
+      let changed = false;
+      for (let i = 0; i < SIM_ITERATIONS_PER_FRAME; i++) {
+        changed = sim.step(clampedDt / SIM_ITERATIONS_PER_FRAME) || changed;
+      }
+      if (changed) {
+        meshFrameRef.current++;
+        if (meshFrameRef.current % 2 === 0) {
+          rebuildMesh();
+        }
+      }
+      // Update sim status in overlay
+      onStats({
+        vertices: meshRef.current?.geometry?.attributes?.position?.count ?? 0,
+        triangles: (meshRef.current?.geometry?.index?.count ?? 0) / 3,
+        simActive: sim.simActive,
+      });
+    }
   });
 
   return <mesh ref={meshRef} material={material} onClick={handleClick} />;
