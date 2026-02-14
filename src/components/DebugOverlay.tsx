@@ -1,5 +1,5 @@
 interface DebugOverlayProps {
-  stats: { vertices: number; triangles: number };
+  stats: { vertices: number; triangles: number; simActive?: boolean };
 }
 
 export default function DebugOverlay({ stats }: DebugOverlayProps) {
@@ -18,6 +18,9 @@ export default function DebugOverlay({ stats }: DebugOverlayProps) {
           <p>triangles: <span className="text-foreground">{stats.triangles.toLocaleString()}</span></p>
           <p>grid: <span className="text-foreground">64×32×64</span> · voxel: <span className="text-foreground">2.5cm</span></p>
           <p>extraction: <span className="text-foreground">Surface Nets</span></p>
+          <p>physics: <span className={stats.simActive ? "text-accent" : "text-muted-foreground"}>
+            {stats.simActive ? "● Mohr-Coulomb active" : "○ idle"}
+          </span></p>
         </div>
       </div>
     </div>
