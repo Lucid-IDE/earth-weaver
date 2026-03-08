@@ -227,7 +227,7 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
   return (
     <>
       <mesh ref={meshRef} material={material} onClick={handleClick} />
-      <ParticleCloud simRef={simRef} />
+      {/* ParticleCloud hidden until MPM physics is properly tuned */}
     </>
   );
 }
