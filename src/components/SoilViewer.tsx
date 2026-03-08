@@ -178,10 +178,23 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
           rebuildMesh();
         }
       }
-      onStats({
+      const statsData = {
         vertices: meshRef.current?.geometry?.attributes?.position?.count ?? 0,
         triangles: (meshRef.current?.geometry?.index?.count ?? 0) / 3,
         simActive: sim.simActive,
+        activeParticles: sim.getActiveParticles(),
+        totalParticles: sim.mpm.numParticles,
+      };
+      onStats(statsData);
+
+      // Detect settling for auto-capture
+      settleDetector.current(sim.simActive, statsData);
+    } else if (sim && !sim.simActive) {
+      // Sim just went idle
+      settleDetector.current(false, {
+        vertices: meshRef.current?.geometry?.attributes?.position?.count ?? 0,
+        triangles: (meshRef.current?.geometry?.index?.count ?? 0) / 3,
+        simActive: false,
         activeParticles: sim.getActiveParticles(),
         totalParticles: sim.mpm.numParticles,
       });
