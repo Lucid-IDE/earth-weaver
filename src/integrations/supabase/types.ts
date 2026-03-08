@@ -14,7 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      sim_screenshots: {
+        Row: {
+          analysis: string | null
+          created_at: string
+          id: string
+          image_url: string
+          metadata: Json | null
+          model_used: string | null
+          source: string
+          trigger_type: string
+        }
+        Insert: {
+          analysis?: string | null
+          created_at?: string
+          id?: string
+          image_url: string
+          metadata?: Json | null
+          model_used?: string | null
+          source?: string
+          trigger_type?: string
+        }
+        Update: {
+          analysis?: string | null
+          created_at?: string
+          id?: string
+          image_url?: string
+          metadata?: Json | null
+          model_used?: string | null
+          source?: string
+          trigger_type?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
