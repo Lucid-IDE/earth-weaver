@@ -502,9 +502,21 @@ function gridToParticle(state: MPMSolverState, dt: number) {
 
     // Apply per-particle velocity damping (moisture + material dependent)
     const damp = MPM_VELOCITY_DAMPING * (1 - (state.damping[p] || 0));
-    state.vx[p] = newVx * damp;
-    state.vy[p] = newVy * damp;
-    state.vz[p] = newVz * damp;
+    newVx *= damp;
+    newVy *= damp;
+    newVz *= damp;
+
+    // Hard velocity clamp — prevents catastrophic blowup
+    const maxSpeed = 2.0;
+    const speed = Math.sqrt(newVx * newVx + newVy * newVy + newVz * newVz);
+    if (speed > maxSpeed) {
+      const s = maxSpeed / speed;
+      newVx *= s; newVy *= s; newVz *= s;
+    }
+
+    state.vx[p] = newVx;
+    state.vy[p] = newVy;
+    state.vz[p] = newVz;
 
     // Update deformation gradient: F = (I + dt * C) * F_old
     const fOff = p * 9;
