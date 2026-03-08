@@ -190,44 +190,21 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
 
     const sim = simRef.current;
     if (sim && sim.simActive) {
-      const clampedDt = Math.min(dt, 1 / 30);
-      let changed = false;
-      for (let i = 0; i < SIM_ITERATIONS_PER_FRAME; i++) {
-        changed = sim.step(clampedDt / SIM_ITERATIONS_PER_FRAME) || changed;
+      // Run sim to completion instantly (hidden from user)
+      let safety = 0;
+      while (sim.simActive && safety < 500) {
+        sim.step(1 / 60);
+        safety++;
       }
-      if (changed) {
-        meshFrameRef.current++;
-        if (meshFrameRef.current % 3 === 0) {
-          rebuildMesh();
-        }
-      }
-      const statsData = {
-        vertices: meshRef.current?.geometry?.attributes?.position?.count ?? 0,
-        triangles: (meshRef.current?.geometry?.index?.count ?? 0) / 3,
-        simActive: sim.simActive,
-        activeParticles: sim.getActiveParticles(),
-        totalParticles: sim.mpm.numParticles,
-      };
-      onStats(statsData);
-
-      // Detect settling for auto-capture
-      settleDetector.current(sim.simActive, statsData);
-    } else if (sim && !sim.simActive) {
-      // Sim just went idle
-      settleDetector.current(false, {
-        vertices: meshRef.current?.geometry?.attributes?.position?.count ?? 0,
-        triangles: (meshRef.current?.geometry?.index?.count ?? 0) / 3,
-        simActive: false,
-        activeParticles: sim.getActiveParticles(),
-        totalParticles: sim.mpm.numParticles,
-      });
+      // Rebuild mesh once with final result
+      rebuildMesh();
     }
   });
 
   return (
     <>
       <mesh ref={meshRef} material={material} onClick={handleClick} />
-      <ParticleCloud simRef={simRef} />
+      {/* ParticleCloud hidden until MPM physics is properly tuned */}
     </>
   );
 }
