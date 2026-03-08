@@ -281,14 +281,18 @@ const G2P_CODE = PARTICLE_DEF + CELL_DEF + SIM_PARAMS + FP_DECODE + `
   var w:array<vec3f,3>;
   w[0]=0.5*(0.5-cd)*(0.5-cd); w[1]=0.75-cd*cd; w[2]=0.5*(0.5+cd)*(0.5+cd);
 
+  let GX = i32(gridSize.x); let GY = i32(gridSize.y); let GZ = i32(gridSize.z);
+
   var nv = vec3f(0.0);
   var B = mat3x3f(vec3f(0),vec3f(0),vec3f(0));
   for(var gx=0;gx<3;gx++){for(var gy=0;gy<3;gy++){for(var gz=0;gz<3;gz++){
     let wt = w[gx].x*w[gy].y*w[gz].z;
     if(wt<1e-12){continue;}
-    let cx = vec3f(ci.x+f32(gx)-1.0,ci.y+f32(gy)-1.0,ci.z+f32(gz)-1.0);
+    let cxi = i32(ci.x)+gx-1; let cyi = i32(ci.y)+gy-1; let czi = i32(ci.z)+gz-1;
+    if(cxi<0 || cxi>=GX || cyi<0 || cyi>=GY || czi<0 || czi>=GZ){continue;}
+    let cx = vec3f(f32(cxi), f32(cyi), f32(czi));
     let cdist = (cx+0.5)-p.position;
-    let idx = i32(cx.x)*i32(gridSize.y)*i32(gridSize.z)+i32(cx.y)*i32(gridSize.z)+i32(cx.z);
+    let idx = cxi*GY*GZ+cyi*GZ+czi;
     let gv = vec3f(decode(cells[idx].vx), decode(cells[idx].vy), decode(cells[idx].vz));
     let wv = gv*wt;
     nv += wv;
