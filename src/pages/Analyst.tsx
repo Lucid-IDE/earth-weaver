@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import StreamingAnalysis from '@/components/analyst/StreamingAnalysis';
 import ComparisonView from '@/components/analyst/ComparisonView';
+import RoundtableView from '@/components/analyst/RoundtableView';
 import {
   fetchScreenshots,
   deleteScreenshot,
