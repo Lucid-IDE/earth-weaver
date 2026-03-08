@@ -47,6 +47,23 @@ export class SoilSimulator {
       mpmStep(this.mpm, MPM_DT, this.field);
     }
 
+    // Diagnostic: log particle stats every 60 frames
+    if (Math.random() < 0.02) {
+      let maxSpeed = 0, maxF = 0, nanCount = 0;
+      for (let p = 0; p < this.mpm.numParticles; p++) {
+        if (!this.mpm.active[p]) continue;
+        const spd = Math.sqrt(this.mpm.vx[p]**2 + this.mpm.vy[p]**2 + this.mpm.vz[p]**2);
+        if (isNaN(spd)) { nanCount++; continue; }
+        if (spd > maxSpeed) maxSpeed = spd;
+        const fOff = p * 9;
+        for (let k = 0; k < 9; k++) {
+          const fv = Math.abs(this.mpm.F[fOff + k]);
+          if (fv > maxF) maxF = fv;
+        }
+      }
+      console.log(`[MPM] active=${activeCount} maxSpeed=${maxSpeed.toFixed(4)} maxF=${maxF.toFixed(4)} NaN=${nanCount} vol=${this.mpm.volume[0]?.toExponential(2)} mu=${this.mpm.mu[0]?.toFixed(1)} lam=${this.mpm.lambda[0]?.toFixed(1)}`);
+    }
+
     // Try to deposit settled particles back into SDF
     depositParticlesIntoSDF(this.field, this.mpm);
 
