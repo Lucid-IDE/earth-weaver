@@ -28,7 +28,7 @@ export const DP_FRICTION_ANGLE = 30 * Math.PI / 180;
 export const DP_COHESION = 0.0;               // kPa, overridden per-material
 
 // Particle spawn/deposit thresholds
-export const SPAWN_SHELL_DEPTH = 3;           // voxels deep from surface to spawn
+export const SPAWN_SHELL_DEPTH = 5;           // voxels deep from surface to spawn (denser particle coverage)
 export const SETTLE_VELOCITY = 0.008;         // speed below which particle settles
 export const SETTLE_FRAMES = 60;              // frames below threshold before deposit (longer = more visible physics)
 
