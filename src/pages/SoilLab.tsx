@@ -1,7 +1,13 @@
+import { useState } from 'react';
 import { useNavigate } from "react-router-dom";
+import CaptureButton from '@/components/analyst/CaptureButton';
+import AnalystPanel from '@/components/analyst/AnalystPanel';
+import { Brain } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 const SoilLab = () => {
   const navigate = useNavigate();
+  const [analystOpen, setAnalystOpen] = useState(false);
 
   return (
     <div className="w-full h-screen flex flex-col bg-background">
@@ -22,13 +28,38 @@ const SoilLab = () => {
           🪨 Soil Lab — Drucker-Prager MLS-MPM
         </h1>
         <span className="text-xs text-muted-foreground">
-          WebGPU • Drag to interact • P to pause • Change color to brown for soil look
+          WebGPU • Drag to interact • P to pause
         </span>
+        <div className="ml-auto flex items-center gap-2">
+          <CaptureButton source="soil-lab" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setAnalystOpen(true)}
+            className="gap-1.5"
+          >
+            <Brain className="h-3.5 w-3.5" />
+            Analyst
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate('/analyst')}
+            className="text-xs text-muted-foreground"
+          >
+            Full View →
+          </Button>
+        </div>
       </div>
       <iframe
         src="/soil-lab.html"
         className="flex-1 w-full border-none"
         title="Soil MLS-MPM Simulation"
+      />
+      <AnalystPanel
+        isOpen={analystOpen}
+        onClose={() => setAnalystOpen(false)}
+        source="soil-lab"
       />
     </div>
   );
