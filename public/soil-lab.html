@@ -211,15 +211,48 @@ fn p2g_2(@builtin(global_invocation_id) id: vec3<u32>) {\r
             }\r
         }
 
-        let volume: f32 = 1.0 / density; 
+        let volume: f32 = 1.0 / max(density, 0.01); 
         densities[id.x] = density;
 
-        let pressure: f32 = max(-0.0, stiffness * (pow(density / restDensity, 1.) - 1));
+        // ═══ Drucker-Prager Viscoplastic Soil Stress ═══
+        let soilStiffness: f32 = stiffness * 10.0;
+        let soilViscosity: f32 = dynamicViscosity * 50.0;
+        let frictionAngle: f32 = 0.5236;
+        let cohesion_val: f32 = 0.5;
 
-        var stress: mat3x3f = mat3x3f(-pressure, 0, 0, 0, -pressure, 0, 0, 0, -pressure);\r
-        let dudv: mat3x3f = particle.C;\r
-        let strain: mat3x3f = dudv + transpose(dudv);\r
-        stress += dynamicViscosity * strain;
+        let pressure: f32 = soilStiffness * max(0.0, density / restDensity - 1.0);
+
+        let dudv: mat3x3f = particle.C;
+        let strainRate: mat3x3f = dudv + transpose(dudv);
+        let trS: f32 = strainRate[0][0] + strainRate[1][1] + strainRate[2][2];
+        let devS: mat3x3f = strainRate - (trS / 3.0) * mat3x3f(
+            vec3f(1, 0, 0), vec3f(0, 1, 0), vec3f(0, 0, 1)
+        );
+
+        var devNormSq: f32 = 0.0;
+        for (var ci = 0; ci < 3; ci++) {
+            devNormSq += dot(devS[ci], devS[ci]);
+        }
+        let devNorm: f32 = sqrt(max(devNormSq, 0.0));
+
+        let sinPhi: f32 = sin(frictionAngle);
+        let cosPhi: f32 = cos(frictionAngle);
+        let alpha_dp: f32 = sqrt(2.0 / 3.0) * 2.0 * sinPhi / (3.0 - sinPhi);
+        let k_c: f32 = sqrt(2.0 / 3.0) * 2.0 * cohesion_val * cosPhi / (3.0 - sinPhi);
+        let yieldStress: f32 = k_c + alpha_dp * max(pressure, 0.0);
+
+        var yieldScale: f32 = 1.0;
+        let viscousDevStress: f32 = soilViscosity * devNorm;
+        if (viscousDevStress > yieldStress && devNorm > 1e-6) {
+            yieldScale = yieldStress / viscousDevStress;
+        }
+
+        var stress: mat3x3f = mat3x3f(
+            vec3f(-pressure, 0, 0),
+            vec3f(0, -pressure, 0),
+            vec3f(0, 0, -pressure)
+        );
+        stress += soilViscosity * yieldScale * devS;
 
         let eq_16_term0 = -volume * 4 * stress * dt;
 
