@@ -11,7 +11,6 @@ import {
   MPMSolverState, createSolverState, mpmStep, getActiveParticleCount,
   initParticleF,
 } from '../mpm/mpmSolver';
-import { MPM_DT, MPM_STEPS_PER_FRAME } from '../mpm/constants';
 import { spawnParticlesFromSDF, depositParticlesIntoSDF } from '../mpm/bridge';
 
 const MAX_PARTICLE_LIFETIME = 300; // frames before forced deposit
