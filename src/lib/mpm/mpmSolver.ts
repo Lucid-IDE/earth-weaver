@@ -111,8 +111,9 @@ export function addParticle(
   state.px[i] = x; state.py[i] = y; state.pz[i] = z;
   state.vx[i] = 0; state.vy[i] = 0; state.vz[i] = 0;
   state.mass[i] = particleMass;
-  // Volume divided by particles sharing this cell — critical for correct stress magnitude
-  state.volume[i] = (MPM_DX * MPM_DX * MPM_DX) / particlesPerCell;
+  // Unit volume — matches reference MLS-MPM (vol=1.0). Stress scales as vol*E,
+  // so E values are tuned with this in mind. Do NOT use dx³/particlesPerCell (too small by ~800,000x).
+  state.volume[i] = 1.0;
   state.materialType[i] = matType;
   state.frictionAngle[i] = friction;
   state.cohesion[i] = coh;
