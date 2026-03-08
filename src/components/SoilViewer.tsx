@@ -18,16 +18,65 @@ export interface SoilStats {
 }
 
 // ── Particle Spheres (InstancedMesh) ─────────────────────────────────
-function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | null> }) {
-  const meshRef = useRef<THREE.InstancedMesh>(null!);
-  const maxDisplay = 16384;
-  const dummy = useMemo(() => new THREE.Object3D(), []);
+// Seeded RNG for consistent chunk shapes
+function mulberry32(a: number) {
+  return function() {
+    var t = a += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }
+}
 
-  const geometry = useMemo(() => new THREE.SphereGeometry(0.004, 6, 4), []);
+function createDirtChunkGeometry(seed: number): THREE.BufferGeometry {
+  const rng = mulberry32(seed);
+  const baseRadius = 0.004;
+  // Low-poly icosahedron is best for rock/chunk shapes
+  const geo = new THREE.IcosahedronGeometry(baseRadius, 1);
+  const pos = geo.attributes.position;
+  const v = new THREE.Vector3();
+  
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    // Simple noise-like displacement based on position
+    const freq = 300;
+    const noise = Math.sin(v.x * freq + seed) * Math.sin(v.y * freq + seed) * Math.sin(v.z * freq + seed);
+    const scale = 1.0 + noise * 0.4 + (rng() - 0.5) * 0.2;
+    v.multiplyScalar(scale);
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  
+  geo.computeVertexNormals();
+  return geo;
+}
+
+const CHUNK_TYPES = 4; // 4 different base geometries
+
+function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | null> }) {
+  const maxDisplay = 16384;
+  // Create multiple mesh refs for different geometry types
+  const meshRefs = [
+    useRef<THREE.InstancedMesh>(null!),
+    useRef<THREE.InstancedMesh>(null!),
+    useRef<THREE.InstancedMesh>(null!),
+    useRef<THREE.InstancedMesh>(null!),
+  ];
+  
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  
+  // Pre-compute 4 distinct dirt chunk geometries
+  const geometries = useMemo(() => {
+    const geos = [];
+    for (let i = 0; i < CHUNK_TYPES; i++) {
+      geos.push(createDirtChunkGeometry(12345 + i * 999));
+    }
+    return geos;
+  }, []);
+
   const material = useMemo(() => new THREE.MeshStandardMaterial({
-    roughness: 0.85,
+    roughness: 0.95, // Dirt is very rough
     metalness: 0.0,
-    flatShading: true,
+    flatShading: true, // Gives a nice faceted/chunky look
   }), []);
 
   // Material type → color (earthy tones)
@@ -38,9 +87,30 @@ function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
     new THREE.Color(0.28, 0.22, 0.14),  // Organic
     new THREE.Color(0.58, 0.56, 0.52),  // Gravel
     new THREE.Color(0.48, 0.40, 0.30),  // Loam
+    new THREE.Color(0.60, 0.50, 0.35),  // Sandy Silt
   ], []);
 
   const tmpColor = useMemo(() => new THREE.Color(), []);
+  // Pre-generate random properties per particle index
+  const particleProps = useMemo(() => {
+    const props = new Float32Array(MAX_PARTICLES * 4); // scale, rotX, rotY, rotZ, geoType, r, g, b
+    const rng = mulberry32(42);
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+      // Scale variation: 0.6x to 1.5x
+      props[i*8 + 0] = 0.6 + rng() * 0.9;
+      // Rotation
+      props[i*8 + 1] = rng() * Math.PI * 2;
+      props[i*8 + 2] = rng() * Math.PI * 2;
+      props[i*8 + 3] = rng() * Math.PI * 2;
+      // Geometry assignment (0 to CHUNK_TYPES-1)
+      props[i*8 + 4] = Math.floor(rng() * CHUNK_TYPES);
+      // Color jitter (±10%)
+      props[i*8 + 5] = (rng() - 0.5) * 0.2;
+      props[i*8 + 6] = (rng() - 0.5) * 0.2;
+      props[i*8 + 7] = (rng() - 0.5) * 0.2;
+    }
+    return props;
+  }, []);
 
   useFrame(() => {
     const sim = simRef.current;
