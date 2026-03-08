@@ -99,6 +99,7 @@ function DirtSplatCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulat
     geo.setAttribute('instanceScale', scaleAttr);
     geo.setAttribute('instanceRotation', rotAttr);
     geo.setAttribute('instanceNoisePhase', noiseAttr);
+    geo.setAttribute('instanceMoisture', moistureAttr);
     
     geo.instanceCount = 0;
     
