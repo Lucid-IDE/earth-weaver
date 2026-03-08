@@ -8,20 +8,39 @@ const corsHeaders = {
 
 const SYSTEM_PROMPT = `You are an expert simulation physicist and graphics engineer specializing in:
 - MLS-MPM (Moving Least Squares Material Point Method)
-- Drucker-Prager elastoplasticity
-- WebGPU compute shaders and rendering pipelines
+- Drucker-Prager elastoplasticity with Neo-Hookean Kirchhoff stress
+- WebGPU compute shaders, WGSL, and rendering pipelines
 - Real-time physics simulation optimization
+- Substrate-Aligned Computing (SAC) methodology
 
-You are analyzing a screenshot from a soil/fluid simulation built with WebGPU.
+You are analyzing a screenshot from Project MAELSTROM — a WebGPU MLS-MPM soil/fluid simulation.
 
-Your job:
-1. Describe what you see in the screenshot — particle distribution, terrain shape, visual artifacts, rendering quality
-2. Identify potential physics issues — instability, particle explosion, unrealistic flow, poor piling behavior, boundary artifacts
-3. Identify rendering issues — depth discontinuities, color banding, missing shadows, billboard artifacts
-4. Give specific, actionable recommendations with code-level suggestions where possible
-5. Rate the overall quality on a scale of 1-10 for both physics accuracy and visual quality
+CONTEXT FROM PRINCIPIA MORPHICA (project design document):
+- The project uses SAC: aligning numerical methods with GPU substrate topology
+- Three experiment lanes: Authoritative (strict), Perceptual (visual approx), Heretical (lossy shortcuts)
+- Key bottleneck is P2G (Particle-to-Grid) transfer with atomicAdd contention
+- Morton-sorted workgroups reduce cache thrashing
+- TMU exploitation for spatial interpolation
+- Raster blending for perceptual accumulation
+- Deformation gradient F tracking with SVD-based return mapping
+- Billboard sphere splatting → bilateral depth smoothing → Lambert composite rendering
 
-Be concise but thorough. Use technical language. Reference specific shader passes, solver parameters, or constitutive models when relevant.`;
+KEY SOLVER ARCHITECTURE:
+- src/lib/mpm/mpmSolver.ts: CPU MLS-MPM with Drucker-Prager return mapping
+- src/lib/soil/soilSim.ts: Hybrid SDF-MPM soil simulator driving VoxelField
+- src/lib/soil/VoxelField.ts: 64x32x64 SDF voxel field with Surface Nets mesh extraction
+- src/lib/soil/soilShader.ts: GLSL vertex/fragment shaders with dual-light Lambert + disturbance coloring
+- public/soil-lab.html: WebGPU MLS-MPM with WGSL compute shaders (P2G, grid update, G2P passes)
+
+Your analysis job:
+1. VISUAL: Describe what you see — particle distribution, terrain shape, artifacts, rendering quality
+2. PHYSICS: Identify issues — instability, particle explosion, unrealistic flow, poor piling, boundary artifacts
+3. RENDERING: Depth discontinuities, color banding, missing shadows, billboard artifacts, mesh quality
+4. RECOMMENDATIONS: Specific, actionable fixes with code-level suggestions referencing actual files
+5. RATING: Score physics accuracy (1-10) and visual quality (1-10)
+6. SAC ALIGNMENT: How well does the current state align with Substrate-Aligned Computing principles?
+
+Be concise but thorough. Use technical language. Reference specific shader passes, solver parameters, and constitutive models.`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -29,14 +48,14 @@ serve(async (req) => {
   }
 
   try {
-    const { imageBase64, source, metadata, codeContext, docsContext, model } = await req.json();
+    const { imageBase64, source, metadata, codeContext, docsContext, model, stream } = await req.json();
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    // Build the user message with image + context
+    // Build user message with image + context
     const userContent: any[] = [];
 
     if (imageBase64) {
@@ -52,19 +71,17 @@ serve(async (req) => {
 
     let textPrompt = `Analyzing screenshot from: ${source || "unknown"}\n`;
     if (metadata) {
-      textPrompt += `\nSimulation metadata:\n${JSON.stringify(metadata, null, 2)}\n`;
+      textPrompt += `\nSimulation state:\n${JSON.stringify(metadata, null, 2)}\n`;
     }
     if (codeContext) {
-      textPrompt += `\nRelevant code context:\n\`\`\`\n${codeContext.substring(0, 4000)}\n\`\`\`\n`;
+      textPrompt += `\nRelevant code:\n\`\`\`\n${codeContext.substring(0, 4000)}\n\`\`\`\n`;
     }
     if (docsContext) {
-      textPrompt += `\nProject documentation context:\n${docsContext.substring(0, 3000)}\n`;
+      textPrompt += `\nAdditional context:\n${docsContext.substring(0, 3000)}\n`;
     }
-    textPrompt += `\nPlease analyze this simulation screenshot and provide recommendations.`;
-
+    textPrompt += `\nAnalyze this simulation screenshot. Provide actionable recommendations.`;
     userContent.push({ type: "text", text: textPrompt });
 
-    // Use the specified model or default to gemini-3.1-pro for vision
     const selectedModel = model || "google/gemini-3.1-pro-preview";
 
     const response = await fetch(
@@ -81,7 +98,8 @@ serve(async (req) => {
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user", content: userContent },
           ],
-          max_tokens: 2000,
+          max_tokens: 2500,
+          stream: !!stream,
         }),
       }
     );
@@ -104,6 +122,14 @@ serve(async (req) => {
       throw new Error(`AI gateway returned ${response.status}`);
     }
 
+    // If streaming, pass through the SSE stream
+    if (stream) {
+      return new Response(response.body, {
+        headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+      });
+    }
+
+    // Non-streaming: parse and return
     const data = await response.json();
     const analysis = data.choices?.[0]?.message?.content || "No analysis generated.";
 

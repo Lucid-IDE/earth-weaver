@@ -7,6 +7,7 @@ import { SoilSimulator } from '@/lib/soil/soilSim';
 import { soilVertexShader, soilFragmentShader } from '@/lib/soil/soilShader';
 import { DIG_RADIUS, SIM_ITERATIONS_PER_FRAME } from '@/lib/soil/constants';
 import { mpmToWorld } from '@/lib/mpm/bridge';
+import { triggerAutoCapture, createSettleDetector } from '@/lib/analyst/autoCapture';
 
 export interface SoilStats {
   vertices: number;
@@ -96,6 +97,7 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
   const fieldRef = useRef<VoxelField | null>(null);
   const simRef = useRef<SoilSimulator | null>(null);
   const meshFrameRef = useRef(0);
+  const settleDetector = useRef(createSettleDetector('soil-terrain'));
 
   const material = useMemo(() => new THREE.ShaderMaterial({
     vertexShader: soilVertexShader,
@@ -151,6 +153,13 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
     fieldRef.current.applyStamp(digPoint.x, digPoint.y, digPoint.z, DIG_RADIUS);
     rebuildMesh();
     simRef.current?.activate();
+
+    // Auto-capture on dig
+    const sim = simRef.current;
+    triggerAutoCapture('dig', {
+      digPoint: { x: digPoint.x, y: digPoint.y, z: digPoint.z },
+      activeParticles: sim?.getActiveParticles() ?? 0,
+    });
   }, [rebuildMesh]);
 
   useFrame((_, dt) => {
@@ -169,10 +178,23 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
           rebuildMesh();
         }
       }
-      onStats({
+      const statsData = {
         vertices: meshRef.current?.geometry?.attributes?.position?.count ?? 0,
         triangles: (meshRef.current?.geometry?.index?.count ?? 0) / 3,
         simActive: sim.simActive,
+        activeParticles: sim.getActiveParticles(),
+        totalParticles: sim.mpm.numParticles,
+      };
+      onStats(statsData);
+
+      // Detect settling for auto-capture
+      settleDetector.current(sim.simActive, statsData);
+    } else if (sim && !sim.simActive) {
+      // Sim just went idle
+      settleDetector.current(false, {
+        vertices: meshRef.current?.geometry?.attributes?.position?.count ?? 0,
+        triangles: (meshRef.current?.geometry?.index?.count ?? 0) / 3,
+        simActive: false,
         activeParticles: sim.getActiveParticles(),
         totalParticles: sim.mpm.numParticles,
       });
