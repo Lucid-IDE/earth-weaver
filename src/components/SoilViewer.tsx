@@ -9,15 +9,11 @@ import { DIG_RADIUS } from '@/lib/soil/constants';
 import { mpmToWorld } from '@/lib/mpm/bridge';
 import { triggerAutoCapture, createSettleDetector } from '@/lib/analyst/autoCapture';
 import {
-  particleDepthVertexShader,
-  particleDepthFragmentShader,
-  bilateralFilterVertexShader,
-  bilateralFilterFragmentShader,
-  normalReconstructionVertexShader,
-  normalReconstructionFragmentShader,
-  fluidShadingVertexShader,
-  fluidShadingFragmentShader,
-} from '@/lib/rendering/fluidShaders';
+  dirtSplatVertexShader,
+  dirtSplatFragmentShader,
+  dustVertexShader,
+  dustFragmentShader,
+} from '@/lib/rendering/dirtShaders';
 
 export interface SoilStats {
   vertices: number;
@@ -27,8 +23,7 @@ export interface SoilStats {
   totalParticles: number;
 }
 
-// ── Particle Spheres (InstancedMesh) ─────────────────────────────────
-// Seeded RNG for consistent chunk shapes
+// ── Seeded RNG ──────────────────────────────────────────────────────
 function mulberry32(a: number) {
   return function() {
     var t = a += 0x6D2B79F5;
@@ -38,282 +33,294 @@ function mulberry32(a: number) {
   }
 }
 
-function createDirtChunkGeometry(seed: number): THREE.BufferGeometry {
-  const rng = mulberry32(seed);
-  const baseRadius = 0.004;
-  const geo = new THREE.IcosahedronGeometry(baseRadius, 1);
-  const pos = geo.attributes.position;
-  const v = new THREE.Vector3();
-  
-  for (let i = 0; i < pos.count; i++) {
-    v.fromBufferAttribute(pos, i);
-    const freq = 300;
-    const noise = Math.sin(v.x * freq + seed) * Math.sin(v.y * freq + seed) * Math.sin(v.z * freq + seed);
-    const scale = 1.0 + noise * 0.4 + (rng() - 0.5) * 0.2;
-    v.multiplyScalar(scale);
-    pos.setXYZ(i, v.x, v.y, v.z);
-  }
-  
-  geo.computeVertexNormals();
-  return geo;
-}
+// ── Material color palette ──────────────────────────────────────────
+const MATERIAL_BASE_COLORS = [
+  [0.76, 0.70, 0.50],  // Sand - warm tan
+  [0.52, 0.36, 0.24],  // Clay - reddish brown
+  [0.65, 0.55, 0.40],  // Silt - grey-brown
+  [0.28, 0.22, 0.14],  // Organic - dark earth
+  [0.58, 0.56, 0.52],  // Gravel - grey
+  [0.48, 0.40, 0.30],  // Loam - medium brown
+  [0.60, 0.50, 0.35],  // Sandy Silt
+];
 
-const CHUNK_TYPES = 4;
-
-// ── Screen-Space Fluid Renderer ──────────────────────────────────────
-function ScreenSpaceFluidRenderer({ 
-  simRef 
-}: { 
-  simRef: React.MutableRefObject<SoilSimulator | null> 
-}) {
-  const { gl, scene, camera, size } = useThree();
+// ── Dirt Splat Cloud ────────────────────────────────────────────────
+// Renders particles as large overlapping camera-facing quads with soft
+// edges and procedural noise, creating a cohesive dirt mass appearance.
+function DirtSplatCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | null> }) {
+  const MAX_SPLATS = 16384;
+  const meshRef = useRef<THREE.Mesh>(null!);
   
-  // Render targets
-  const depthTarget = useMemo(() => new THREE.WebGLRenderTarget(size.width, size.height, {
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-    format: THREE.RGBAFormat,
-    type: THREE.FloatType,
-  }), [size]);
-  
-  const smoothTarget = useMemo(() => new THREE.WebGLRenderTarget(size.width, size.height, {
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-    format: THREE.RGBAFormat,
-    type: THREE.FloatType,
-  }), [size]);
-  
-  const normalTarget = useMemo(() => new THREE.WebGLRenderTarget(size.width, size.height, {
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-    format: THREE.RGBAFormat,
-  }), [size]);
-  
-  // Fullscreen quad for post-processing
-  const quadScene = useMemo(() => new THREE.Scene(), []);
-  const quadCamera = useMemo(() => new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), []);
-  const quadGeo = useMemo(() => new THREE.PlaneGeometry(2, 2), []);
-  
-  // Bilateral filter material
-  const bilateralMat = useMemo(() => new THREE.ShaderMaterial({
-    vertexShader: bilateralFilterVertexShader,
-    fragmentShader: bilateralFilterFragmentShader,
-    uniforms: {
-      depthTexture: { value: null },
-      resolution: { value: new THREE.Vector2(size.width, size.height) },
-      filterRadius: { value: 0.05 },
-      blurScale: { value: 3.0 },
-      blurDepthFalloff: { value: 100.0 },
-    },
-  }), [size]);
-  
-  // Normal reconstruction material
-  const normalMat = useMemo(() => new THREE.ShaderMaterial({
-    vertexShader: normalReconstructionVertexShader,
-    fragmentShader: normalReconstructionFragmentShader,
-    uniforms: {
-      smoothedDepthTexture: { value: null },
-      resolution: { value: new THREE.Vector2(size.width, size.height) },
-      near: { value: (camera as THREE.PerspectiveCamera).near },
-      far: { value: (camera as THREE.PerspectiveCamera).far },
-      projectionMatrix: { value: camera.projectionMatrix },
-    },
-  }), [size, camera]);
-  
-  // Fluid shading material
-  const fluidMat = useMemo(() => new THREE.ShaderMaterial({
-    vertexShader: fluidShadingVertexShader,
-    fragmentShader: fluidShadingFragmentShader,
-    uniforms: {
-      smoothedDepthTexture: { value: null },
-      normalTexture: { value: null },
-      lightDirection: { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() },
-      fluidColor: { value: new THREE.Color(0.55, 0.45, 0.32) }, // Earthy soil color
-      roughness: { value: 0.95 },
-      metalness: { value: 0.0 },
-    },
-    transparent: true,
-    depthWrite: false,
-  }), []);
-  
-  const bilateralQuad = useMemo(() => new THREE.Mesh(quadGeo, bilateralMat), [quadGeo, bilateralMat]);
-  const normalQuad = useMemo(() => new THREE.Mesh(quadGeo, normalMat), [quadGeo, normalMat]);
-  const fluidQuad = useMemo(() => new THREE.Mesh(quadGeo, fluidMat), [quadGeo, fluidMat]);
-  
-  useEffect(() => {
-    quadScene.add(bilateralQuad);
-    return () => { quadScene.remove(bilateralQuad); };
-  }, [quadScene, bilateralQuad]);
-  
-  // Update resolution on resize
-  useEffect(() => {
-    depthTarget.setSize(size.width, size.height);
-    smoothTarget.setSize(size.width, size.height);
-    normalTarget.setSize(size.width, size.height);
-    bilateralMat.uniforms.resolution.value.set(size.width, size.height);
-    normalMat.uniforms.resolution.value.set(size.width, size.height);
-  }, [size, depthTarget, smoothTarget, normalTarget, bilateralMat, normalMat]);
-  
-  // This component doesn't render anything itself — it hijacks the render loop
-  useFrame(() => {
-    // 1. Render particle depths to depthTarget
-    // (The main ParticleCloud component handles this with a depth material)
-    
-    // 2. Bilateral filter: depthTarget → smoothTarget
-    bilateralMat.uniforms.depthTexture.value = depthTarget.texture;
-    quadScene.remove(bilateralQuad);
-    quadScene.add(bilateralQuad);
-    
-    const oldRenderTarget = gl.getRenderTarget();
-    gl.setRenderTarget(smoothTarget);
-    gl.render(quadScene, quadCamera);
-    
-    // 3. Normal reconstruction: smoothTarget → normalTarget
-    normalMat.uniforms.smoothedDepthTexture.value = smoothTarget.texture;
-    quadScene.remove(bilateralQuad);
-    quadScene.add(normalQuad);
-    
-    gl.setRenderTarget(normalTarget);
-    gl.render(quadScene, quadCamera);
-    
-    // 4. Fluid shading: blend fluid surface over scene
-    fluidMat.uniforms.smoothedDepthTexture.value = smoothTarget.texture;
-    fluidMat.uniforms.normalTexture.value = normalTarget.texture;
-    quadScene.remove(normalQuad);
-    quadScene.add(fluidQuad);
-    
-    gl.setRenderTarget(oldRenderTarget);
-    // Render to screen happens naturally on next frame
-    
-  }, 2); // Priority 2: render AFTER main scene but BEFORE final output
-  
-  return null;
-}
-
-// ── Particle Cloud (renders to depth buffer) ────────────────────────
-function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | null> }) {
-  const maxDisplay = 16384;
-  const meshRefs = [
-    useRef<THREE.InstancedMesh>(null!),
-    useRef<THREE.InstancedMesh>(null!),
-    useRef<THREE.InstancedMesh>(null!),
-    useRef<THREE.InstancedMesh>(null!),
-  ];
-  
-  const dummy = useMemo(() => new THREE.Object3D(), []);
-  
-  const geometries = useMemo(() => {
-    const geos = [];
-    for (let i = 0; i < CHUNK_TYPES; i++) {
-      geos.push(createDirtChunkGeometry(12345 + i * 999));
-    }
-    return geos;
-  }, []);
-
-  const material = useMemo(() => new THREE.MeshStandardMaterial({
-    roughness: 0.95,
-    metalness: 0.0,
-    flatShading: true,
-  }), []);
-
-  const MATERIAL_COLORS = useMemo(() => [
-    new THREE.Color(0.76, 0.70, 0.50),  // Sand
-    new THREE.Color(0.52, 0.36, 0.24),  // Clay
-    new THREE.Color(0.65, 0.55, 0.40),  // Silt
-    new THREE.Color(0.28, 0.22, 0.14),  // Organic
-    new THREE.Color(0.58, 0.56, 0.52),  // Gravel
-    new THREE.Color(0.48, 0.40, 0.30),  // Loam
-    new THREE.Color(0.60, 0.50, 0.35),  // Sandy Silt
-  ], []);
-
-  const tmpColor = useMemo(() => new THREE.Color(), []);
-  
-  const particleProps = useMemo(() => {
-    const props = new Float32Array(65536 * 8);
+  // Pre-generate per-particle random properties
+  const particleRng = useMemo(() => {
     const rng = mulberry32(42);
+    const data = new Float32Array(65536 * 4); // scale, rotation, noisePhase, colorJitter
     for (let i = 0; i < 65536; i++) {
-      props[i*8 + 0] = 0.6 + rng() * 0.9;
-      props[i*8 + 1] = rng() * Math.PI * 2;
-      props[i*8 + 2] = rng() * Math.PI * 2;
-      props[i*8 + 3] = rng() * Math.PI * 2;
-      props[i*8 + 4] = Math.floor(rng() * CHUNK_TYPES);
-      props[i*8 + 5] = (rng() - 0.5) * 0.2;
-      props[i*8 + 6] = (rng() - 0.5) * 0.2;
-      props[i*8 + 7] = (rng() - 0.5) * 0.2;
+      data[i*4 + 0] = 0.012 + rng() * 0.016; // scale: large enough to overlap (0.012 - 0.028)
+      data[i*4 + 1] = rng() * Math.PI * 2;    // rotation
+      data[i*4 + 2] = rng() * 10.0;           // noise phase
+      data[i*4 + 3] = (rng() - 0.5) * 0.15;  // color jitter
     }
-    return props;
+    return data;
   }, []);
-
+  
+  // Create instanced buffer geometry with a quad
+  const { geometry, material } = useMemo(() => {
+    // Quad geometry (two triangles)
+    const geo = new THREE.InstancedBufferGeometry();
+    const vertices = new Float32Array([
+      -1, -1, 0,  1, -1, 0,  1, 1, 0,
+      -1, -1, 0,  1, 1, 0,   -1, 1, 0,
+    ]);
+    const uvs = new Float32Array([
+      0, 0,  1, 0,  1, 1,
+      0, 0,  1, 1,  0, 1,
+    ]);
+    geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    
+    // Instance attributes
+    const posAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS * 3), 3);
+    const colorAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS * 4), 4);
+    const scaleAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS), 1);
+    const rotAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS), 1);
+    const noiseAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS), 1);
+    
+    posAttr.setUsage(THREE.DynamicDrawUsage);
+    colorAttr.setUsage(THREE.DynamicDrawUsage);
+    scaleAttr.setUsage(THREE.DynamicDrawUsage);
+    rotAttr.setUsage(THREE.DynamicDrawUsage);
+    noiseAttr.setUsage(THREE.DynamicDrawUsage);
+    
+    geo.setAttribute('instancePosition', posAttr);
+    geo.setAttribute('instanceColor', colorAttr);
+    geo.setAttribute('instanceScale', scaleAttr);
+    geo.setAttribute('instanceRotation', rotAttr);
+    geo.setAttribute('instanceNoisePhase', noiseAttr);
+    
+    geo.instanceCount = 0;
+    
+    const mat = new THREE.ShaderMaterial({
+      vertexShader: dirtSplatVertexShader,
+      fragmentShader: dirtSplatFragmentShader,
+      transparent: true,
+      depthWrite: true,
+      depthTest: true,
+      side: THREE.DoubleSide,
+      blending: THREE.NormalBlending,
+    });
+    
+    return { geometry: geo, material: mat };
+  }, []);
+  
   useFrame(() => {
     const sim = simRef.current;
     if (!sim) return;
-
+    
     const mpm = sim.mpm;
-    const counts = [0, 0, 0, 0];
-    let totalDisplayed = 0;
-
-    for (let i = 0; i < mpm.numParticles && totalDisplayed < maxDisplay; i++) {
+    const posArr = geometry.getAttribute('instancePosition') as THREE.InstancedBufferAttribute;
+    const colorArr = geometry.getAttribute('instanceColor') as THREE.InstancedBufferAttribute;
+    const scaleArr = geometry.getAttribute('instanceScale') as THREE.InstancedBufferAttribute;
+    const rotArr = geometry.getAttribute('instanceRotation') as THREE.InstancedBufferAttribute;
+    const noiseArr = geometry.getAttribute('instanceNoisePhase') as THREE.InstancedBufferAttribute;
+    
+    let count = 0;
+    
+    for (let i = 0; i < mpm.numParticles && count < MAX_SPLATS; i++) {
       if (!mpm.active[i]) continue;
-
-      const pOff = i * 8;
-      const geoType = particleProps[pOff + 4];
-      const inst = meshRefs[geoType].current;
-      if (!inst) continue;
-
-      const count = counts[geoType];
       
       const [wx, wy, wz] = mpmToWorld(mpm.px[i], mpm.py[i], mpm.pz[i]);
+      
+      // Particle velocity for motion effects
       const vx = mpm.vx[i], vy = mpm.vy[i], vz = mpm.vz[i];
       const speed = Math.sqrt(vx*vx + vy*vy + vz*vz);
       
-      dummy.position.set(wx, wy, wz);
-      dummy.rotation.set(
-        particleProps[pOff + 1] + wy * 100, 
-        particleProps[pOff + 2] + wx * 100, 
-        particleProps[pOff + 3] + wz * 100
-      );
+      // Position
+      posArr.setXYZ(count, wx, wy, wz);
       
-      const baseScale = particleProps[pOff + 0];
-      dummy.scale.set(baseScale, baseScale * (1 + speed*0.2), baseScale);
+      // Scale: larger when moving fast (stretchy splats)
+      const rOff = i * 4;
+      const baseScale = particleRng[rOff + 0];
+      const motionScale = 1.0 + Math.min(speed * 0.5, 0.8);
+      scaleArr.setX(count, baseScale * motionScale);
       
-      dummy.updateMatrix();
-      inst.setMatrixAt(count, dummy.matrix);
-
+      // Rotation: base + slight velocity-based twist
+      rotArr.setX(count, particleRng[rOff + 1] + speed * 2.0);
+      
+      // Noise phase
+      noiseArr.setX(count, particleRng[rOff + 2]);
+      
+      // Color from material type with moisture and jitter
       const matType = Math.min(mpm.materialType[i], 6);
-      const base = MATERIAL_COLORS[matType];
-      const m = mpm.moisture ? mpm.moisture[i] : 0;
-      const darken = 1 - m * 0.35;
+      const base = MATERIAL_BASE_COLORS[matType];
+      const moisture = mpm.moisture ? mpm.moisture[i] : 0;
+      const darken = 1 - moisture * 0.4;
+      const jitter = particleRng[rOff + 3];
       
-      tmpColor.setRGB(
-        Math.max(0, Math.min(1, base.r * darken + particleProps[pOff + 5])),
-        Math.max(0, Math.min(1, base.g * darken + particleProps[pOff + 6])),
-        Math.max(0, Math.min(1, base.b * darken + particleProps[pOff + 7]))
+      colorArr.setXYZW(
+        count,
+        Math.max(0, Math.min(1, base[0] * darken + jitter)),
+        Math.max(0, Math.min(1, base[1] * darken + jitter * 0.8)),
+        Math.max(0, Math.min(1, base[2] * darken + jitter * 0.6)),
+        1.0
       );
-      inst.setColorAt(count, tmpColor);
-
-      counts[geoType]++;
-      totalDisplayed++;
+      
+      count++;
     }
+    
+    geometry.instanceCount = count;
+    posArr.needsUpdate = true;
+    colorArr.needsUpdate = true;
+    scaleArr.needsUpdate = true;
+    rotArr.needsUpdate = true;
+    noiseArr.needsUpdate = true;
+  });
+  
+  return <mesh ref={meshRef} geometry={geometry} material={material} frustumCulled={false} />;
+}
 
-    for (let g = 0; g < CHUNK_TYPES; g++) {
-      const inst = meshRefs[g].current;
-      if (inst) {
-        inst.count = counts[g];
-        inst.instanceMatrix.needsUpdate = true;
-        if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+// ── Dust Particle System ────────────────────────────────────────────
+// Small translucent particles that float up from impacts
+function DustCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | null> }) {
+  const MAX_DUST = 2048;
+  
+  const dustState = useMemo(() => ({
+    px: new Float32Array(MAX_DUST),
+    py: new Float32Array(MAX_DUST),
+    pz: new Float32Array(MAX_DUST),
+    vx: new Float32Array(MAX_DUST),
+    vy: new Float32Array(MAX_DUST),
+    vz: new Float32Array(MAX_DUST),
+    life: new Float32Array(MAX_DUST), // 0 = dead, 1 = just born
+    scale: new Float32Array(MAX_DUST),
+    count: 0,
+    lastParticleCount: 0,
+  }), []);
+  
+  const { geometry, material } = useMemo(() => {
+    const geo = new THREE.InstancedBufferGeometry();
+    const vertices = new Float32Array([
+      -1, -1, 0,  1, -1, 0,  1, 1, 0,
+      -1, -1, 0,  1, 1, 0,  -1, 1, 0,
+    ]);
+    const uvs = new Float32Array([
+      0, 0,  1, 0,  1, 1,
+      0, 0,  1, 1,  0, 1,
+    ]);
+    geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    
+    const posAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_DUST * 3), 3);
+    const alphaAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_DUST), 1);
+    const scaleAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_DUST), 1);
+    posAttr.setUsage(THREE.DynamicDrawUsage);
+    alphaAttr.setUsage(THREE.DynamicDrawUsage);
+    scaleAttr.setUsage(THREE.DynamicDrawUsage);
+    
+    geo.setAttribute('instancePosition', posAttr);
+    geo.setAttribute('instanceAlpha', alphaAttr);
+    geo.setAttribute('instanceScale', scaleAttr);
+    geo.instanceCount = 0;
+    
+    const mat = new THREE.ShaderMaterial({
+      vertexShader: dustVertexShader,
+      fragmentShader: dustFragmentShader,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      blending: THREE.AdditiveBlending,
+    });
+    
+    return { geometry: geo, material: mat };
+  }, []);
+  
+  const rng = useMemo(() => mulberry32(9999), []);
+  
+  useFrame((_, dt) => {
+    const sim = simRef.current;
+    if (!sim) return;
+    
+    const mpm = sim.mpm;
+    const ds = dustState;
+    
+    // Spawn dust from fast-moving particles
+    const currentCount = mpm.numParticles;
+    // Spawn burst when new particles appear (dig event)
+    if (currentCount > ds.lastParticleCount + 10) {
+      const newCount = currentCount - ds.lastParticleCount;
+      const spawnCount = Math.min(newCount * 2, 200);
+      for (let s = 0; s < spawnCount && ds.count < MAX_DUST; s++) {
+        const srcIdx = ds.lastParticleCount + Math.floor(rng() * newCount);
+        if (srcIdx >= currentCount) continue;
+        const [wx, wy, wz] = mpmToWorld(mpm.px[srcIdx], mpm.py[srcIdx], mpm.pz[srcIdx]);
+        const di = ds.count % MAX_DUST;
+        ds.px[di] = wx + (rng() - 0.5) * 0.04;
+        ds.py[di] = wy + (rng() - 0.5) * 0.04;
+        ds.pz[di] = wz + (rng() - 0.5) * 0.04;
+        ds.vx[di] = (rng() - 0.5) * 0.15;
+        ds.vy[di] = rng() * 0.2 + 0.05;
+        ds.vz[di] = (rng() - 0.5) * 0.15;
+        ds.life[di] = 1.0;
+        ds.scale[di] = 0.005 + rng() * 0.015;
+        ds.count = Math.min(ds.count + 1, MAX_DUST);
       }
     }
+    ds.lastParticleCount = currentCount;
+    
+    // Also spawn from fast-moving particles (continuous dust trail)
+    for (let i = 0; i < mpm.numParticles; i++) {
+      if (!mpm.active[i]) continue;
+      const speed = Math.sqrt(mpm.vx[i]**2 + mpm.vy[i]**2 + mpm.vz[i]**2);
+      if (speed > 0.3 && rng() < 0.05) {
+        const [wx, wy, wz] = mpmToWorld(mpm.px[i], mpm.py[i], mpm.pz[i]);
+        const di = ds.count % MAX_DUST;
+        ds.px[di] = wx;
+        ds.py[di] = wy;
+        ds.pz[di] = wz;
+        ds.vx[di] = (rng() - 0.5) * 0.08;
+        ds.vy[di] = rng() * 0.1 + 0.02;
+        ds.vz[di] = (rng() - 0.5) * 0.08;
+        ds.life[di] = 0.7 + rng() * 0.3;
+        ds.scale[di] = 0.003 + rng() * 0.008;
+        ds.count = Math.min(ds.count + 1, MAX_DUST);
+      }
+    }
+    
+    // Update dust particles
+    const posAttr = geometry.getAttribute('instancePosition') as THREE.InstancedBufferAttribute;
+    const alphaAttr = geometry.getAttribute('instanceAlpha') as THREE.InstancedBufferAttribute;
+    const scaleAttr = geometry.getAttribute('instanceScale') as THREE.InstancedBufferAttribute;
+    
+    const clampedDt = Math.min(dt, 0.033);
+    let visibleCount = 0;
+    
+    for (let i = 0; i < ds.count; i++) {
+      if (ds.life[i] <= 0) continue;
+      
+      // Physics
+      ds.px[i] += ds.vx[i] * clampedDt;
+      ds.py[i] += ds.vy[i] * clampedDt;
+      ds.pz[i] += ds.vz[i] * clampedDt;
+      ds.vy[i] -= 0.3 * clampedDt; // slight gravity
+      ds.vx[i] *= 0.98; // air drag
+      ds.vz[i] *= 0.98;
+      ds.life[i] -= clampedDt * 0.8; // fade out over ~1.25s
+      
+      if (ds.life[i] <= 0) continue;
+      
+      posAttr.setXYZ(visibleCount, ds.px[i], ds.py[i], ds.pz[i]);
+      alphaAttr.setX(visibleCount, ds.life[i]);
+      scaleAttr.setX(visibleCount, ds.scale[i] * (1.0 + (1.0 - ds.life[i]) * 2.0)); // expand as fading
+      visibleCount++;
+    }
+    
+    geometry.instanceCount = visibleCount;
+    posAttr.needsUpdate = true;
+    alphaAttr.needsUpdate = true;
+    scaleAttr.needsUpdate = true;
   });
-
-  return (
-    <>
-      <ambientLight intensity={0.4} />
-      <directionalLight position={[2, 3, 1]} intensity={0.8} />
-      {geometries.map((geo, i) => (
-        <instancedMesh key={i} ref={meshRefs[i]} args={[geo, material, maxDisplay]} frustumCulled={false} />
-      ))}
-    </>
-  );
+  
+  return <mesh geometry={geometry} material={material} frustumCulled={false} />;
 }
 
 // ── Soil Terrain Mesh ────────────────────────────────────────────────
@@ -423,8 +430,8 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
   return (
     <>
       <mesh ref={meshRef} material={material} onClick={handleClick} />
-      <ParticleCloud simRef={simRef} />
-      {/* <ScreenSpaceFluidRenderer simRef={simRef} /> */}
+      <DirtSplatCloud simRef={simRef} />
+      <DustCloud simRef={simRef} />
     </>
   );
 }
