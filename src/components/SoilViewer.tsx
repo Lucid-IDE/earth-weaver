@@ -6,6 +6,7 @@ import { VoxelField } from '@/lib/soil/VoxelField';
 import { SoilSimulator } from '@/lib/soil/soilSim';
 import { soilVertexShader, soilFragmentShader } from '@/lib/soil/soilShader';
 import { DIG_RADIUS, SIM_ITERATIONS_PER_FRAME } from '@/lib/soil/constants';
+import { mpmToWorld } from '@/lib/mpm/bridge';
 
 export interface SoilStats {
   vertices: number;
