@@ -6,6 +6,7 @@ import { VoxelField } from '@/lib/soil/VoxelField';
 import { SoilSimulator } from '@/lib/soil/soilSim';
 import { soilVertexShader, soilFragmentShader } from '@/lib/soil/soilShader';
 import { DIG_RADIUS, SIM_ITERATIONS_PER_FRAME } from '@/lib/soil/constants';
+import { mpmToWorld } from '@/lib/mpm/bridge';
 
 export interface SoilStats {
   vertices: number;
@@ -61,19 +62,15 @@ function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
     const pos = posAttr.array as Float32Array;
     const col = colAttr.array as Float32Array;
 
-    // Map MPM [0,1]^3 → world coords for rendering
-    const WX_MIN = -0.8, WX_RANGE = 1.6;
-    const WY_MIN = -0.4, WY_RANGE = 0.8;
-    const WZ_MIN = -0.8, WZ_RANGE = 1.6;
-
     let count = 0;
     for (let i = 0; i < mpm.numParticles && count < maxDisplay; i++) {
       if (!mpm.active[i]) continue;
 
+      const [wx, wy, wz] = mpmToWorld(mpm.px[i], mpm.py[i], mpm.pz[i]);
       const wi = count * 3;
-      pos[wi]     = mpm.px[i] * WX_RANGE + WX_MIN;
-      pos[wi + 1] = mpm.py[i] * WY_RANGE + WY_MIN;
-      pos[wi + 2] = mpm.pz[i] * WZ_RANGE + WZ_MIN;
+      pos[wi]     = wx;
+      pos[wi + 1] = wy;
+      pos[wi + 2] = wz;
 
       const matType = Math.min(mpm.materialType[i], 5);
       const c = MATERIAL_COLORS[matType];
