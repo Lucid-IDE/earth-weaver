@@ -219,7 +219,7 @@ function particleToGrid(state: MPMSolverState, dt: number) {
     const fy = y * invDx - by;
     const fz = z * invDx - bz;
 
-    // ── Compute stress via Neo-Hookean + Drucker-Prager ──
+    // ── Compute stress via Fixed Corotated + Drucker-Prager ──
     const fOff = p * 9;
     const F: [number,number,number,number,number,number,number,number,number] = [
       state.F[fOff], state.F[fOff+1], state.F[fOff+2],
@@ -278,39 +278,49 @@ function particleToGrid(state: MPMSolverState, dt: number) {
 
     // Determinant J
     const J = projSigma[0] * projSigma[1] * projSigma[2];
-    const logJ = Math.log(Math.max(1e-10, J));
 
-    // Neo-Hookean Kirchhoff stress: τ = μ(FFᵀ - I) + λ ln(J) I
-    // For MLS-MPM we need: stress = -pvol * 4/dx² * τ
-    // We compute Cauchy stress σ = τ / J, then multiply
-    // Per-particle Lamé parameters (from material brain)
+    // Per-particle Lamé parameters
     const mu = state.mu[p] || MU_0;
     const lam = state.lambda[p] || LAMBDA_0;
 
-    // FFᵀ
-    const FFt = [
-      Fproj[0]*Fproj[0]+Fproj[1]*Fproj[1]+Fproj[2]*Fproj[2],
-      Fproj[0]*Fproj[3]+Fproj[1]*Fproj[4]+Fproj[2]*Fproj[5],
-      Fproj[0]*Fproj[6]+Fproj[1]*Fproj[7]+Fproj[2]*Fproj[8],
-      Fproj[3]*Fproj[0]+Fproj[4]*Fproj[1]+Fproj[5]*Fproj[2],
-      Fproj[3]*Fproj[3]+Fproj[4]*Fproj[4]+Fproj[5]*Fproj[5],
-      Fproj[3]*Fproj[6]+Fproj[4]*Fproj[7]+Fproj[5]*Fproj[8],
-      Fproj[6]*Fproj[0]+Fproj[7]*Fproj[1]+Fproj[8]*Fproj[2],
-      Fproj[6]*Fproj[3]+Fproj[7]*Fproj[4]+Fproj[8]*Fproj[5],
-      Fproj[6]*Fproj[6]+Fproj[7]*Fproj[7]+Fproj[8]*Fproj[8],
+    // ── Fixed Corotated stress (correct for granular/sand) ──
+    // R = U V^T (rotation part)
+    // stress = 2μ(F - R)Fᵀ + λJ(J-1)I
+    // This is MUCH more stable than Neo-Hookean for dense particle packing
+    const R = mat3Mul_inline(U, mat3T_inline(V));
+
+    // (F - R)
+    const FmR = [
+      Fproj[0]-R[0], Fproj[1]-R[1], Fproj[2]-R[2],
+      Fproj[3]-R[3], Fproj[4]-R[4], Fproj[5]-R[5],
+      Fproj[6]-R[6], Fproj[7]-R[7], Fproj[8]-R[8],
     ];
 
-    // Kirchhoff stress τ = μ(FFᵀ - I) + λ ln(J) I
+    // (F - R) Fᵀ
+    const FmRFt = [
+      FmR[0]*Fproj[0]+FmR[1]*Fproj[1]+FmR[2]*Fproj[2],
+      FmR[0]*Fproj[3]+FmR[1]*Fproj[4]+FmR[2]*Fproj[5],
+      FmR[0]*Fproj[6]+FmR[1]*Fproj[7]+FmR[2]*Fproj[8],
+      FmR[3]*Fproj[0]+FmR[4]*Fproj[1]+FmR[5]*Fproj[2],
+      FmR[3]*Fproj[3]+FmR[4]*Fproj[4]+FmR[5]*Fproj[5],
+      FmR[3]*Fproj[6]+FmR[4]*Fproj[7]+FmR[5]*Fproj[8],
+      FmR[6]*Fproj[0]+FmR[7]*Fproj[1]+FmR[8]*Fproj[2],
+      FmR[6]*Fproj[3]+FmR[7]*Fproj[4]+FmR[8]*Fproj[5],
+      FmR[6]*Fproj[6]+FmR[7]*Fproj[7]+FmR[8]*Fproj[8],
+    ];
+
+    // Kirchhoff stress: τ = 2μ(F-R)Fᵀ + λJ(J-1)I
+    const volTerm = lam * J * (J - 1);
     const tau = [
-      mu * (FFt[0] - 1) + lam * logJ,
-      mu * FFt[1],
-      mu * FFt[2],
-      mu * FFt[3],
-      mu * (FFt[4] - 1) + lam * logJ,
-      mu * FFt[5],
-      mu * FFt[6],
-      mu * FFt[7],
-      mu * (FFt[8] - 1) + lam * logJ,
+      2 * mu * FmRFt[0] + volTerm,
+      2 * mu * FmRFt[1],
+      2 * mu * FmRFt[2],
+      2 * mu * FmRFt[3],
+      2 * mu * FmRFt[4] + volTerm,
+      2 * mu * FmRFt[5],
+      2 * mu * FmRFt[6],
+      2 * mu * FmRFt[7],
+      2 * mu * FmRFt[8] + volTerm,
     ];
 
     // MLS-MPM stress contribution: -pvol * 4 * invDx² * τ * dt
