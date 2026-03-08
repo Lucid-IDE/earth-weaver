@@ -11,7 +11,7 @@ export const MPM_GRAVITY = -9.81;
 export const MPM_STEPS_PER_FRAME = 8;         // substeps per render frame
 
 // Velocity damping — prevents energy buildup and helps settling
-export const MPM_VELOCITY_DAMPING = 0.985;    // per-substep multiplier (stronger damping prevents blowup)
+export const MPM_VELOCITY_DAMPING = 0.998;    // per-substep multiplier (less damping = more visible motion)
 
 // Particle limits
 export const MAX_PARTICLES = 65536;

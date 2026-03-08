@@ -184,7 +184,9 @@ export function depositParticlesIntoSDF(
     // Deposit: make this voxel more solid
     const idx = field.vidx(ix, iy, iz);
     field.phi[idx] = Math.max(-32767, field.phi[idx] - 10000) as number;
-    field.disturbanceAge[idx] = 0;
+    // CRITICAL: Set disturbanceAge to non-zero to prevent re-spawn loop
+    // spawnParticlesFromSDF checks for === 0 as "freshly disturbed"
+    field.disturbanceAge[idx] = 100; // mark as deposited/settled
 
     // Also fill neighbors slightly for smoother deposition
     const neighborDirs: [number,number,number][] = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
@@ -194,7 +196,7 @@ export function depositParticlesIntoSDF(
       const nidx = field.vidx(ni, nj, nk);
       if (field.phi[nidx] > 0) {
         field.phi[nidx] = Math.max(-32767, field.phi[nidx] - 3000) as number;
-        field.disturbanceAge[nidx] = 0;
+        field.disturbanceAge[nidx] = 100; // also mark as settled
       }
     }
 
