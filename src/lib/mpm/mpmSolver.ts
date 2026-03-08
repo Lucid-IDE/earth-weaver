@@ -100,6 +100,10 @@ export function addParticle(
   matType: number,
   friction: number, coh: number,
   particleMass: number = 1.0,
+  youngModulus: number = 1.2e4,
+  poissonRatio: number = 0.25,
+  dampingFactor: number = 0.02,
+  moisture: number = 0.0,
 ): number {
   if (state.numParticles >= MAX_PARTICLES) return -1;
   const i = state.numParticles++;
@@ -110,6 +114,11 @@ export function addParticle(
   state.materialType[i] = matType;
   state.frictionAngle[i] = friction;
   state.cohesion[i] = coh;
+  // Per-material Lamé parameters
+  state.mu[i] = youngModulus / (2 * (1 + poissonRatio));
+  state.lambda[i] = youngModulus * poissonRatio / ((1 + poissonRatio) * (1 - 2 * poissonRatio));
+  state.damping[i] = dampingFactor;
+  state.moisture[i] = moisture;
   state.settleCounter[i] = 0;
   state.active[i] = 1;
   initParticleF(state, i);
