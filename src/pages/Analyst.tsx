@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Brain, Trash2, Loader2, ImageIcon, ArrowLeft } from 'lucide-react';
+import { Brain, Trash2, ImageIcon, ArrowLeft, ArrowLeftRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import ReactMarkdown from 'react-markdown';
+import StreamingAnalysis from '@/components/analyst/StreamingAnalysis';
+import ComparisonView from '@/components/analyst/ComparisonView';
 import {
   fetchScreenshots,
-  analyzeScreenshot,
   deleteScreenshot,
   type Screenshot,
 } from '@/lib/analyst/screenshotService';
@@ -22,33 +22,22 @@ const DOCS_CONTEXT = `Project MAELSTROM: WebGPU MLS-MPM soil/fluid simulation.
 Uses Substrate-Aligned Computing (SAC) for GPU optimization.
 Key physics: Drucker-Prager elastoplasticity, Neo-Hookean Kirchhoff stress,
 SVD-based return mapping, deformation gradient F tracking.
-Rendering: Billboard sphere splatting → bilateral depth smoothing → Lambert composite.`;
+Rendering: Billboard sphere splatting → bilateral depth smoothing → Lambert composite.
+Three experiment lanes: Authoritative, Perceptual, Heretical.
+Morton-sorted workgroups for cache coherency. TMU exploitation for spatial interpolation.`;
 
 export default function Analyst() {
   const navigate = useNavigate();
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
   const [selected, setSelected] = useState<Screenshot | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
   const [model, setModel] = useState('google/gemini-3.1-pro-preview');
+  const [showComparison, setShowComparison] = useState(false);
 
   const load = useCallback(async () => {
     setScreenshots(await fetchScreenshots());
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  const handleAnalyze = async (s: Screenshot) => {
-    setAnalyzing(true);
-    try {
-      const analysis = await analyzeScreenshot(s, CODE_CONTEXT, DOCS_CONTEXT, model);
-      if (analysis) {
-        setSelected((prev) => prev ? { ...prev, analysis, model_used: model } : null);
-        await load();
-      }
-    } finally {
-      setAnalyzing(false);
-    }
-  };
 
   const handleDelete = async (s: Screenshot) => {
     await deleteScreenshot(s);
@@ -67,16 +56,29 @@ export default function Analyst() {
           <Brain className="h-4 w-4 text-accent" />
           <h1 className="text-sm font-semibold text-foreground">AI Simulation Analyst</h1>
         </div>
-        <select
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          className="ml-auto text-xs bg-secondary text-secondary-foreground rounded px-2 py-1.5 border border-border"
-        >
-          <option value="google/gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
-          <option value="google/gemini-3-pro-image-preview">Gemini 3 Pro Image</option>
-          <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
-          <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
-        </select>
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant={showComparison ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => { setShowComparison(!showComparison); setSelected(null); }}
+            className="gap-1.5 text-xs"
+          >
+            <ArrowLeftRight className="h-3 w-3" />
+            Compare
+          </Button>
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="text-xs bg-secondary text-secondary-foreground rounded px-2 py-1.5 border border-border"
+          >
+            <option value="google/gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
+            <option value="google/gemini-3-flash-preview">Gemini 3 Flash</option>
+            <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
+            <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
+            <option value="openai/gpt-5">GPT-5</option>
+            <option value="openai/gpt-5-nano">GPT-5 Nano</option>
+          </select>
+        </div>
       </div>
 
       {/* Main content */}
@@ -101,7 +103,7 @@ export default function Analyst() {
                 screenshots.map((s) => (
                   <div
                     key={s.id}
-                    onClick={() => setSelected(s)}
+                    onClick={() => { setSelected(s); setShowComparison(false); }}
                     className={`group flex gap-2 p-2 rounded-md border cursor-pointer transition-colors ${
                       selected?.id === s.id
                         ? 'border-accent bg-accent/10'
@@ -137,15 +139,20 @@ export default function Analyst() {
 
         {/* Detail view */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {selected ? (
+          {showComparison ? (
+            <ScrollArea className="flex-1">
+              <ComparisonView
+                screenshots={screenshots}
+                onClose={() => setShowComparison(false)}
+              />
+            </ScrollArea>
+          ) : selected ? (
             <ScrollArea className="flex-1">
               <div className="p-6 space-y-6 max-w-3xl">
-                {/* Image */}
                 <div className="rounded-lg overflow-hidden border border-border shadow-lg">
                   <img src={selected.image_url} alt="Simulation" className="w-full" />
                 </div>
 
-                {/* Metadata */}
                 <div className="flex flex-wrap gap-3 text-[10px] font-mono text-muted-foreground">
                   <span>source: <span className="text-foreground">{selected.source}</span></span>
                   <span>trigger: <span className="text-foreground">{selected.trigger_type}</span></span>
@@ -155,27 +162,16 @@ export default function Analyst() {
                   )}
                 </div>
 
-                {/* Analyze */}
-                <Button
-                  onClick={() => handleAnalyze(selected)}
-                  disabled={analyzing}
-                  className="gap-2"
-                >
-                  {analyzing ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" /> Analyzing…</>
-                  ) : (
-                    <><Brain className="h-4 w-4" /> {selected.analysis ? 'Re-analyze' : 'Analyze with AI'}</>
-                  )}
-                </Button>
-
-                {/* Analysis */}
-                {selected.analysis && (
-                  <div className="bg-secondary/30 rounded-lg p-5 border border-border">
-                    <div className="prose prose-sm prose-invert max-w-none">
-                      <ReactMarkdown>{selected.analysis}</ReactMarkdown>
-                    </div>
-                  </div>
-                )}
+                <StreamingAnalysis
+                  screenshot={selected}
+                  model={model}
+                  codeContext={CODE_CONTEXT}
+                  docsContext={DOCS_CONTEXT}
+                  onAnalysisComplete={(analysis) => {
+                    setSelected((prev) => prev ? { ...prev, analysis, model_used: model } : null);
+                    load();
+                  }}
+                />
               </div>
             </ScrollArea>
           ) : (
