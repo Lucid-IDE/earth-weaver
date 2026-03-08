@@ -617,11 +617,14 @@ async function main(){
     const enc = device.createCommandEncoder();
 
     if(!paused){
+      const SUBSTEPS = 16;
       const cp = enc.beginComputePass();
-      cp.setPipeline(clearPipe); cp.setBindGroup(0,clearBG); cp.dispatchWorkgroups(Math.ceil(TOTAL_CELLS/64));
-      cp.setPipeline(p2gPipe); cp.setBindGroup(0,p2gBG); cp.dispatchWorkgroups(Math.ceil(numP/64));
-      cp.setPipeline(updPipe); cp.setBindGroup(0,updBG); cp.dispatchWorkgroups(Math.ceil(TOTAL_CELLS/64));
-      cp.setPipeline(g2pPipe); cp.setBindGroup(0,g2pBG); cp.dispatchWorkgroups(Math.ceil(numP/64));
+      for(let sub=0; sub<SUBSTEPS; sub++){
+        cp.setPipeline(clearPipe); cp.setBindGroup(0,clearBG); cp.dispatchWorkgroups(Math.ceil(TOTAL_CELLS/64));
+        cp.setPipeline(p2gPipe); cp.setBindGroup(0,p2gBG); cp.dispatchWorkgroups(Math.ceil(numP/64));
+        cp.setPipeline(updPipe); cp.setBindGroup(0,updBG); cp.dispatchWorkgroups(Math.ceil(TOTAL_CELLS/64));
+        cp.setPipeline(g2pPipe); cp.setBindGroup(0,g2pBG); cp.dispatchWorkgroups(Math.ceil(numP/64));
+      }
       cp.setPipeline(cpvPipe); cp.setBindGroup(0,cpvBG); cp.dispatchWorkgroups(Math.ceil(numP/64));
       cp.end();
     }
