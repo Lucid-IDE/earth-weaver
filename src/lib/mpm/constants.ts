@@ -11,7 +11,7 @@ export const MPM_GRAVITY = -9.81;
 export const MPM_STEPS_PER_FRAME = 8;         // substeps per render frame
 
 // Velocity damping — prevents energy buildup and helps settling
-export const MPM_VELOCITY_DAMPING = 0.985;    // per-substep multiplier (stronger damping prevents blowup)
+export const MPM_VELOCITY_DAMPING = 0.998;    // per-substep multiplier (less damping = more visible motion)
 
 // Particle limits
 export const MAX_PARTICLES = 65536;
@@ -29,8 +29,8 @@ export const DP_COHESION = 0.0;               // kPa, overridden per-material
 
 // Particle spawn/deposit thresholds
 export const SPAWN_SHELL_DEPTH = 3;           // voxels deep from surface to spawn
-export const SETTLE_VELOCITY = 0.015;         // speed below which particle settles (was 0.02)
-export const SETTLE_FRAMES = 25;              // frames below threshold before deposit (was 30)
+export const SETTLE_VELOCITY = 0.008;         // speed below which particle settles
+export const SETTLE_FRAMES = 60;              // frames below threshold before deposit (longer = more visible physics)
 
 // World mapping: MPM domain [0,1]^3 maps to SDF world
 export const MPM_WORLD_MIN_X = -0.8;
