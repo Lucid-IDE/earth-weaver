@@ -7,5 +7,5 @@ export const SURFACE_IY = 24;
 export const DIG_RADIUS = 0.07;
 export const WORLD_SEED = 42;
 export const DEG = Math.PI / 180;
-export const SIM_ITERATIONS_PER_FRAME = 3;  // outer loop iters (increased from 2)
+export const SIM_ITERATIONS_PER_FRAME = 1;  // outer loop iters (1 is enough, inner substeps handle it)
 export const SIM_DEACTIVATE_FRAMES = 45;    // shorter idle timeout (was 60)

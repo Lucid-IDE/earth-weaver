@@ -100,17 +100,19 @@ export function addParticle(
   matType: number,
   friction: number, coh: number,
   particleMass: number = 1.0,
-  youngModulus: number = 1.2e4,
+  youngModulus: number = 800,
   poissonRatio: number = 0.25,
-  dampingFactor: number = 0.02,
+  dampingFactor: number = 0.15,
   moisture: number = 0.0,
+  particlesPerCell: number = 3,
 ): number {
   if (state.numParticles >= MAX_PARTICLES) return -1;
   const i = state.numParticles++;
   state.px[i] = x; state.py[i] = y; state.pz[i] = z;
   state.vx[i] = 0; state.vy[i] = 0; state.vz[i] = 0;
   state.mass[i] = particleMass;
-  state.volume[i] = MPM_DX * MPM_DX * MPM_DX;
+  // Volume divided by particles sharing this cell — critical for correct stress magnitude
+  state.volume[i] = (MPM_DX * MPM_DX * MPM_DX) / particlesPerCell;
   state.materialType[i] = matType;
   state.frictionAngle[i] = friction;
   state.cohesion[i] = coh;
