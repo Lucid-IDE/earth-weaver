@@ -100,17 +100,19 @@ export function addParticle(
   matType: number,
   friction: number, coh: number,
   particleMass: number = 1.0,
-  youngModulus: number = 1.2e4,
+  youngModulus: number = 800,
   poissonRatio: number = 0.25,
-  dampingFactor: number = 0.02,
+  dampingFactor: number = 0.15,
   moisture: number = 0.0,
+  particlesPerCell: number = 3,
 ): number {
   if (state.numParticles >= MAX_PARTICLES) return -1;
   const i = state.numParticles++;
   state.px[i] = x; state.py[i] = y; state.pz[i] = z;
   state.vx[i] = 0; state.vy[i] = 0; state.vz[i] = 0;
   state.mass[i] = particleMass;
-  state.volume[i] = MPM_DX * MPM_DX * MPM_DX;
+  // Volume divided by particles sharing this cell — critical for correct stress magnitude
+  state.volume[i] = (MPM_DX * MPM_DX * MPM_DX) / particlesPerCell;
   state.materialType[i] = matType;
   state.frictionAngle[i] = friction;
   state.cohesion[i] = coh;
@@ -500,9 +502,21 @@ function gridToParticle(state: MPMSolverState, dt: number) {
 
     // Apply per-particle velocity damping (moisture + material dependent)
     const damp = MPM_VELOCITY_DAMPING * (1 - (state.damping[p] || 0));
-    state.vx[p] = newVx * damp;
-    state.vy[p] = newVy * damp;
-    state.vz[p] = newVz * damp;
+    newVx *= damp;
+    newVy *= damp;
+    newVz *= damp;
+
+    // Hard velocity clamp — prevents catastrophic blowup
+    const maxSpeed = 2.0;
+    const speed = Math.sqrt(newVx * newVx + newVy * newVy + newVz * newVz);
+    if (speed > maxSpeed) {
+      const s = maxSpeed / speed;
+      newVx *= s; newVy *= s; newVz *= s;
+    }
+
+    state.vx[p] = newVx;
+    state.vy[p] = newVy;
+    state.vz[p] = newVz;
 
     // Update deformation gradient: F = (I + dt * C) * F_old
     const fOff = p * 9;

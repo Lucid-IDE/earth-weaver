@@ -126,6 +126,7 @@ export function spawnParticlesFromSDF(
             mat.specificWeight,
             mat.youngModulus, mat.poissonRatio,
             mat.damping, mat.moisture,
+            PARTICLES_PER_VOXEL,
           );
           spawned++;
         }
