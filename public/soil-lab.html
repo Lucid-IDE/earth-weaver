@@ -1318,7 +1318,7 @@ fn fs(input: FragmentInput) -> @location(0) vec4f {\r
     }\r
 
     let speed = textureSampleLevel(bgTexture, textureSampler, input.uv, 0.0).r;\r
-    let albedo: vec3f = vec3f(0, 70, 250) / 256.;
+    let albedo: vec3f = vec3f(140, 100, 50) / 256.;
 
     let LdotN: f32 = 0.5 * dot(normalWorld, lightDirWorld) + 0.5;\r
     let shadow = exp(-1. * densitySum);
