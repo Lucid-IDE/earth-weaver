@@ -281,8 +281,9 @@ function particleToGrid(state: MPMSolverState, dt: number) {
     // Neo-Hookean Kirchhoff stress: τ = μ(FFᵀ - I) + λ ln(J) I
     // For MLS-MPM we need: stress = -pvol * 4/dx² * τ
     // We compute Cauchy stress σ = τ / J, then multiply
-    const mu = MU_0;
-    const lam = LAMBDA_0;
+    // Per-particle Lamé parameters (from material brain)
+    const mu = state.mu[p] || MU_0;
+    const lam = state.lambda[p] || LAMBDA_0;
 
     // FFᵀ
     const FFt = [
