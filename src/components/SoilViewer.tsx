@@ -623,7 +623,7 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
   return (
     <>
       <mesh ref={meshRef} material={material} onClick={handleClick} />
-      <DirtSplatCloud simRef={simRef} />
+      <FluidRenderer simRef={simRef} />
       <DustCloud simRef={simRef} />
     </>
   );
