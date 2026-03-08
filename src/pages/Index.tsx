@@ -5,6 +5,7 @@ import type { SoilStats } from '@/components/SoilViewer';
 import DebugOverlay from '@/components/DebugOverlay';
 import CaptureButton from '@/components/analyst/CaptureButton';
 import AnalystPanel from '@/components/analyst/AnalystPanel';
+import SoilPresetSelector from '@/components/SoilPresetSelector';
 import { Brain } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -23,6 +24,7 @@ export default function Index() {
 
       {/* Top-right controls */}
       <div className="absolute top-4 right-4 flex items-center gap-2 z-40">
+        <SoilPresetSelector />
         <CaptureButton source="soil-terrain" metadata={stats} />
         <Button
           variant="outline"
