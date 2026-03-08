@@ -153,6 +153,13 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
     fieldRef.current.applyStamp(digPoint.x, digPoint.y, digPoint.z, DIG_RADIUS);
     rebuildMesh();
     simRef.current?.activate();
+
+    // Auto-capture on dig
+    const sim = simRef.current;
+    triggerAutoCapture('dig', {
+      digPoint: { x: digPoint.x, y: digPoint.y, z: digPoint.z },
+      activeParticles: sim?.getActiveParticles() ?? 0,
+    });
   }, [rebuildMesh]);
 
   useFrame((_, dt) => {
