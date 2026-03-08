@@ -9,11 +9,16 @@ import { DIG_RADIUS } from '@/lib/soil/constants';
 import { mpmToWorld } from '@/lib/mpm/bridge';
 import { triggerAutoCapture, createSettleDetector } from '@/lib/analyst/autoCapture';
 import {
-  dirtSplatVertexShader,
-  dirtSplatFragmentShader,
   dustVertexShader,
   dustFragmentShader,
 } from '@/lib/rendering/dirtShaders';
+import {
+  particleDepthVertexShader,
+  particleDepthFragmentShader,
+  fullscreenQuadVertexShader,
+  bilateralFilterFragmentShader,
+  fluidCompositingFragmentShader,
+} from '@/lib/rendering/fluidShaders';
 
 export interface SoilStats {
   vertices: number;
@@ -35,85 +40,234 @@ function mulberry32(a: number) {
 
 // ── Material color palette ──────────────────────────────────────────
 const MATERIAL_BASE_COLORS = [
-  [0.76, 0.70, 0.50],  // Sand - warm tan
-  [0.52, 0.36, 0.24],  // Clay - reddish brown
-  [0.65, 0.55, 0.40],  // Silt - grey-brown
-  [0.28, 0.22, 0.14],  // Organic - dark earth
-  [0.58, 0.56, 0.52],  // Gravel - grey
-  [0.48, 0.40, 0.30],  // Loam - medium brown
+  [0.76, 0.70, 0.50],  // Sand
+  [0.52, 0.36, 0.24],  // Clay
+  [0.65, 0.55, 0.40],  // Silt
+  [0.28, 0.22, 0.14],  // Organic
+  [0.58, 0.56, 0.52],  // Gravel
+  [0.48, 0.40, 0.30],  // Loam
   [0.60, 0.50, 0.35],  // Sandy Silt
 ];
 
-// ── Dirt Splat Cloud ────────────────────────────────────────────────
-// Renders particles as large overlapping camera-facing quads with soft
-// edges and procedural noise, creating a cohesive dirt mass appearance.
-function DirtSplatCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | null> }) {
-  const MAX_SPLATS = 32768;
-  const meshRef = useRef<THREE.Mesh>(null!);
+// ── Screen-Space Fluid Renderer ─────────────────────────────────────
+// Multi-pass pipeline that renders particles into a continuous surface:
+// 1. Depth pass: particles as spherical impostors → depth + color texture
+// 2. Bilateral filter (2-pass separable): smooths depth to merge particles
+// 3. Compositing: reconstruct normals from smoothed depth, shade with SDF material
+function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | null> }) {
+  const MAX_PARTICLES_RENDER = 131072;
+  const { gl, camera, size } = useThree();
   
-  // Pre-generate per-particle random properties
-  const particleRng = useMemo(() => {
-    const rng = mulberry32(42);
-    const data = new Float32Array(65536 * 4); // scale, rotation, noisePhase, colorJitter
-    for (let i = 0; i < 65536; i++) {
-      data[i*4 + 0] = 0.004 + rng() * 0.006; // scale: much smaller splats (0.004 - 0.010) for denser coverage
-      data[i*4 + 1] = rng() * Math.PI * 2;    // rotation
-      data[i*4 + 2] = rng() * 10.0;           // noise phase
-      data[i*4 + 3] = (rng() - 0.5) * 0.08;  // subtler color jitter
-    }
-    return data;
-  }, []);
-  
-  // Create instanced buffer geometry with a quad
-  const { geometry, material } = useMemo(() => {
-    // Quad geometry (two triangles)
-    const geo = new THREE.InstancedBufferGeometry();
-    const vertices = new Float32Array([
-      -1, -1, 0,  1, -1, 0,  1, 1, 0,
-      -1, -1, 0,  1, 1, 0,   -1, 1, 0,
-    ]);
-    const uvs = new Float32Array([
-      0, 0,  1, 0,  1, 1,
-      0, 0,  1, 1,  0, 1,
-    ]);
-    geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  const resources = useMemo(() => {
+    const w = Math.max(size.width, 1);
+    const h = Math.max(size.height, 1);
     
-    // Instance attributes
-    const posAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS * 3), 3);
-    const colorAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS * 4), 4);
-    const scaleAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS), 1);
-    const rotAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS), 1);
-    const noiseAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS), 1);
-    const moistureAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS), 1);
-    moistureAttr.setUsage(THREE.DynamicDrawUsage);
+    // ── Render targets ──
+    const depthTarget = new THREE.WebGLRenderTarget(w, h, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.FloatType,
+      depthBuffer: true,
+    });
     
+    const filterTargetH = new THREE.WebGLRenderTarget(w, h, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.FloatType,
+    });
+    
+    const filterTargetV = new THREE.WebGLRenderTarget(w, h, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.FloatType,
+    });
+    
+    // ── Point sprite geometry for depth pass ──
+    const pointGeo = new THREE.BufferGeometry();
+    const posAttr = new THREE.BufferAttribute(new Float32Array(MAX_PARTICLES_RENDER * 3), 3);
+    const radAttr = new THREE.BufferAttribute(new Float32Array(MAX_PARTICLES_RENDER), 1);
+    const colAttr = new THREE.BufferAttribute(new Float32Array(MAX_PARTICLES_RENDER * 4), 4);
     posAttr.setUsage(THREE.DynamicDrawUsage);
-    colorAttr.setUsage(THREE.DynamicDrawUsage);
-    scaleAttr.setUsage(THREE.DynamicDrawUsage);
-    rotAttr.setUsage(THREE.DynamicDrawUsage);
-    noiseAttr.setUsage(THREE.DynamicDrawUsage);
+    radAttr.setUsage(THREE.DynamicDrawUsage);
+    colAttr.setUsage(THREE.DynamicDrawUsage);
+    pointGeo.setAttribute('position', posAttr); // needed but overridden by instancePosition
     
-    geo.setAttribute('instancePosition', posAttr);
-    geo.setAttribute('instanceColor', colorAttr);
-    geo.setAttribute('instanceScale', scaleAttr);
-    geo.setAttribute('instanceRotation', rotAttr);
-    geo.setAttribute('instanceNoisePhase', noiseAttr);
-    geo.setAttribute('instanceMoisture', moistureAttr);
-    
-    geo.instanceCount = 0;
-    
-    const mat = new THREE.ShaderMaterial({
-      vertexShader: dirtSplatVertexShader,
-      fragmentShader: dirtSplatFragmentShader,
-      transparent: true,
-      depthWrite: true,
+    // For points mode, we use position directly
+    const depthMat = new THREE.ShaderMaterial({
+      vertexShader: particleDepthVertexShader,
+      fragmentShader: particleDepthFragmentShader,
+      uniforms: {
+        near: { value: 0.005 },
+        far: { value: 10 },
+      },
       depthTest: true,
-      side: THREE.DoubleSide,
+      depthWrite: true,
+    });
+    
+    // Use instanced points via custom attribute
+    const instancedGeo = new THREE.InstancedBufferGeometry();
+    // Single point vertex
+    instancedGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, 0, 0]), 3));
+    const instancePosAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PARTICLES_RENDER * 3), 3);
+    const instanceRadiusAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PARTICLES_RENDER), 1);
+    const instanceColorAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PARTICLES_RENDER * 4), 4);
+    instancePosAttr.setUsage(THREE.DynamicDrawUsage);
+    instanceRadiusAttr.setUsage(THREE.DynamicDrawUsage);
+    instanceColorAttr.setUsage(THREE.DynamicDrawUsage);
+    instancedGeo.setAttribute('instancePosition', instancePosAttr);
+    instancedGeo.setAttribute('instanceRadius', instanceRadiusAttr);
+    instancedGeo.setAttribute('instanceColor', instanceColorAttr);
+    instancedGeo.instanceCount = 0;
+    
+    // Actually we need gl_PointSize — use Points with a custom ShaderMaterial
+    // Let's use a simpler approach: regular Points geometry
+    const pointsGeo = new THREE.BufferGeometry();
+    const pPositions = new Float32Array(MAX_PARTICLES_RENDER * 3);
+    const pColors = new Float32Array(MAX_PARTICLES_RENDER * 4);
+    const pRadii = new Float32Array(MAX_PARTICLES_RENDER);
+    pointsGeo.setAttribute('position', new THREE.BufferAttribute(pPositions, 3));
+    pointsGeo.setAttribute('instanceColor', new THREE.BufferAttribute(pColors, 4));
+    pointsGeo.setAttribute('instanceRadius', new THREE.BufferAttribute(pRadii, 1));
+    (pointsGeo.attributes.position as THREE.BufferAttribute).setUsage(THREE.DynamicDrawUsage);
+    (pointsGeo.attributes.instanceColor as THREE.BufferAttribute).setUsage(THREE.DynamicDrawUsage);
+    (pointsGeo.attributes.instanceRadius as THREE.BufferAttribute).setUsage(THREE.DynamicDrawUsage);
+    
+    // Depth material for Points
+    const pointsDepthMat = new THREE.ShaderMaterial({
+      vertexShader: /* glsl */ `
+        attribute vec4 instanceColor;
+        attribute float instanceRadius;
+        
+        varying vec3 vViewPosition;
+        varying float vRadius;
+        varying vec3 vColor;
+        
+        void main() {
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            vViewPosition = mvPosition.xyz;
+            vColor = instanceColor.rgb;
+            vRadius = instanceRadius;
+            
+            float screenRadius = instanceRadius * (800.0 / length(mvPosition.xyz));
+            gl_PointSize = max(screenRadius, 1.0);
+            gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vViewPosition;
+        varying float vRadius;
+        varying vec3 vColor;
+        
+        uniform float near;
+        uniform float far;
+        
+        void main() {
+            vec2 coord = gl_PointCoord * 2.0 - 1.0;
+            float r2 = dot(coord, coord);
+            if (r2 > 1.0) discard;
+            
+            float z = sqrt(1.0 - r2);
+            float depth = vViewPosition.z + z * vRadius;
+            float linearDepth = (-depth - near) / (far - near);
+            
+            gl_FragColor = vec4(linearDepth, vColor);
+            
+            vec4 clipPos = projectionMatrix * vec4(vViewPosition.xy, depth, 1.0);
+            float ndc = clipPos.z / clipPos.w;
+            gl_FragDepth = (ndc + 1.0) * 0.5;
+        }
+      `,
+      uniforms: {
+        near: { value: 0.005 },
+        far: { value: 10.0 },
+      },
+      depthTest: true,
+      depthWrite: true,
+    });
+    
+    const pointsMesh = new THREE.Points(pointsGeo, pointsDepthMat);
+    pointsMesh.frustumCulled = false;
+    
+    // ── Fullscreen quad for filter/composite passes ──
+    const quadGeo = new THREE.PlaneGeometry(2, 2);
+    
+    const filterMat = new THREE.ShaderMaterial({
+      vertexShader: fullscreenQuadVertexShader,
+      fragmentShader: bilateralFilterFragmentShader,
+      uniforms: {
+        depthTexture: { value: null },
+        resolution: { value: new THREE.Vector2(w, h) },
+        filterDirection: { value: new THREE.Vector2(1, 0) },
+        blurScale: { value: 1.5 },
+        blurDepthFalloff: { value: 100.0 },
+      },
+      depthTest: false,
+      depthWrite: false,
+    });
+    
+    const compositeMat = new THREE.ShaderMaterial({
+      vertexShader: fullscreenQuadVertexShader,
+      fragmentShader: fluidCompositingFragmentShader,
+      uniforms: {
+        smoothedDepthTexture: { value: null },
+        resolution: { value: new THREE.Vector2(w, h) },
+        near: { value: 0.005 },
+        far: { value: 10.0 },
+        invProjectionMatrix: { value: new THREE.Matrix4() },
+      },
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
       blending: THREE.NormalBlending,
     });
     
-    return { geometry: geo, material: mat };
+    const filterQuad = new THREE.Mesh(quadGeo, filterMat);
+    const compositeQuad = new THREE.Mesh(quadGeo, compositeMat);
+    
+    const filterScene = new THREE.Scene();
+    filterScene.add(filterQuad);
+    
+    const compositeScene = new THREE.Scene();
+    compositeScene.add(compositeQuad);
+    
+    const orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    
+    const depthScene = new THREE.Scene();
+    depthScene.add(pointsMesh);
+    
+    return {
+      depthTarget, filterTargetH, filterTargetV,
+      pointsGeo, pointsMesh, pointsDepthMat,
+      filterMat, compositeMat,
+      filterScene, compositeScene, depthScene,
+      orthoCamera,
+      pPositions, pColors, pRadii,
+    };
+  }, []);
+  
+  // Handle resize
+  useEffect(() => {
+    const w = Math.max(size.width, 1);
+    const h = Math.max(size.height, 1);
+    resources.depthTarget.setSize(w, h);
+    resources.filterTargetH.setSize(w, h);
+    resources.filterTargetV.setSize(w, h);
+    resources.filterMat.uniforms.resolution.value.set(w, h);
+    resources.compositeMat.uniforms.resolution.value.set(w, h);
+  }, [size.width, size.height, resources]);
+  
+  // Pre-generate particle random data
+  const particleRng = useMemo(() => {
+    const rng = mulberry32(42);
+    const data = new Float32Array(131072 * 2); // radius, colorJitter
+    for (let i = 0; i < 131072; i++) {
+      data[i*2 + 0] = 0.003 + rng() * 0.005; // radius 0.003-0.008
+      data[i*2 + 1] = (rng() - 0.5) * 0.06;  // color jitter
+    }
+    return data;
   }, []);
   
   useFrame(() => {
@@ -121,81 +275,101 @@ function DirtSplatCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulat
     if (!sim) return;
     
     const mpm = sim.mpm;
-    const posArr = geometry.getAttribute('instancePosition') as THREE.InstancedBufferAttribute;
-    const colorArr = geometry.getAttribute('instanceColor') as THREE.InstancedBufferAttribute;
-    const scaleArr = geometry.getAttribute('instanceScale') as THREE.InstancedBufferAttribute;
-    const rotArr = geometry.getAttribute('instanceRotation') as THREE.InstancedBufferAttribute;
-    const noiseArr = geometry.getAttribute('instanceNoisePhase') as THREE.InstancedBufferAttribute;
-    const moistureArr = geometry.getAttribute('instanceMoisture') as THREE.InstancedBufferAttribute;
+    const { pPositions, pColors, pRadii, pointsGeo } = resources;
     
     let count = 0;
     
-    for (let i = 0; i < mpm.numParticles && count < MAX_SPLATS; i++) {
+    for (let i = 0; i < mpm.numParticles && count < MAX_PARTICLES_RENDER; i++) {
       if (!mpm.active[i]) continue;
       
       const [wx, wy, wz] = mpmToWorld(mpm.px[i], mpm.py[i], mpm.pz[i]);
       
-      // Particle velocity for motion effects
-      const vx = mpm.vx[i], vy = mpm.vy[i], vz = mpm.vz[i];
-      const speed = Math.sqrt(vx*vx + vy*vy + vz*vz);
+      pPositions[count * 3] = wx;
+      pPositions[count * 3 + 1] = wy;
+      pPositions[count * 3 + 2] = wz;
       
-      // Position
-      posArr.setXYZ(count, wx, wy, wz);
+      const rOff = (i % 131072) * 2;
+      pRadii[count] = particleRng[rOff];
       
-      // Scale: smaller base, slight motion stretch
-      const rOff = (i % 65536) * 4;
-      const baseScale = particleRng[rOff + 0];
-      const motionScale = 1.0 + Math.min(speed * 0.3, 0.5);
-      scaleArr.setX(count, baseScale * motionScale);
-      
-      // Rotation
-      rotArr.setX(count, particleRng[rOff + 1] + speed * 1.5);
-      
-      // Noise phase
-      noiseArr.setX(count, particleRng[rOff + 2]);
-      
-      // Color from material type — use stratigraphy-matching palette
+      // Color from material type with depth/moisture adjustments
       const matType = Math.min(mpm.materialType[i], 6);
       const base = MATERIAL_BASE_COLORS[matType];
       const moisture = mpm.moisture ? mpm.moisture[i] : 0;
-      moistureArr.setX(count, moisture);
       
-      // Depth-based darkening (deeper = darker, matching SDF terrain)
       const depthFactor = Math.max(0, Math.min(1, (-wy - 0.05) * 3.0));
       const depthDarken = 1.0 - depthFactor * 0.25;
       const moistureDarken = 1 - moisture * 0.35;
       const darken = depthDarken * moistureDarken;
-      const jitter = particleRng[rOff + 3];
+      const jitter = particleRng[rOff + 1];
       
-      // Surface proximity organic boost (matching SDF shader)
+      // Surface proximity organic boost
       const surfaceProximity = 1.0 - Math.min(1, Math.max(0, (-wy + 0.02) / 0.14));
-      const organicR = 0.22, organicG = 0.18, organicB = 0.10;
       const organicMix = surfaceProximity * 0.45;
       
-      const r = ((base[0] * (1 - organicMix) + organicR * organicMix) * darken + jitter);
-      const g = ((base[1] * (1 - organicMix) + organicG * organicMix) * darken + jitter * 0.8);
-      const b = ((base[2] * (1 - organicMix) + organicB * organicMix) * darken + jitter * 0.6);
-      
-      colorArr.setXYZW(count,
-        Math.max(0, Math.min(1, r)),
-        Math.max(0, Math.min(1, g)),
-        Math.max(0, Math.min(1, b)),
-        1.0
-      );
+      pColors[count * 4] = Math.max(0, Math.min(1, (base[0] * (1 - organicMix) + 0.22 * organicMix) * darken + jitter));
+      pColors[count * 4 + 1] = Math.max(0, Math.min(1, (base[1] * (1 - organicMix) + 0.18 * organicMix) * darken + jitter * 0.8));
+      pColors[count * 4 + 2] = Math.max(0, Math.min(1, (base[2] * (1 - organicMix) + 0.10 * organicMix) * darken + jitter * 0.6));
+      pColors[count * 4 + 3] = 1.0;
       
       count++;
     }
     
-    geometry.instanceCount = count;
-    posArr.needsUpdate = true;
-    colorArr.needsUpdate = true;
-    scaleArr.needsUpdate = true;
-    rotArr.needsUpdate = true;
-    noiseArr.needsUpdate = true;
-    moistureArr.needsUpdate = true;
+    pointsGeo.setDrawRange(0, count);
+    (pointsGeo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    (pointsGeo.attributes.instanceColor as THREE.BufferAttribute).needsUpdate = true;
+    (pointsGeo.attributes.instanceRadius as THREE.BufferAttribute).needsUpdate = true;
+    
+    // Skip rendering if no particles
+    if (count === 0) return;
+    
+    // ── Pass 1: Render particle depths ──
+    const currentRT = gl.getRenderTarget();
+    const currentAutoClear = gl.autoClear;
+    gl.autoClear = false;
+    
+    gl.setRenderTarget(resources.depthTarget);
+    gl.clearColor();
+    gl.clearDepth();
+    gl.render(resources.depthScene, camera);
+    
+    // ── Pass 2a: Horizontal bilateral filter ──
+    resources.filterMat.uniforms.depthTexture.value = resources.depthTarget.texture;
+    resources.filterMat.uniforms.filterDirection.value.set(1, 0);
+    gl.setRenderTarget(resources.filterTargetH);
+    gl.clearColor();
+    gl.render(resources.filterScene, resources.orthoCamera);
+    
+    // ── Pass 2b: Vertical bilateral filter ──
+    resources.filterMat.uniforms.depthTexture.value = resources.filterTargetH.texture;
+    resources.filterMat.uniforms.filterDirection.value.set(0, 1);
+    gl.setRenderTarget(resources.filterTargetV);
+    gl.clearColor();
+    gl.render(resources.filterScene, resources.orthoCamera);
+    
+    // ── Pass 3: Composite — normal reconstruction + shading ──
+    resources.compositeMat.uniforms.smoothedDepthTexture.value = resources.filterTargetV.texture;
+    resources.compositeMat.uniforms.invProjectionMatrix.value.copy(camera.projectionMatrixInverse);
+    
+    gl.setRenderTarget(currentRT); // back to screen
+    gl.autoClear = currentAutoClear;
+    // Render composite as transparent overlay
+    gl.render(resources.compositeScene, resources.orthoCamera);
   });
   
-  return <mesh ref={meshRef} geometry={geometry} material={material} frustumCulled={false} />;
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      resources.depthTarget.dispose();
+      resources.filterTargetH.dispose();
+      resources.filterTargetV.dispose();
+      resources.pointsGeo.dispose();
+      resources.pointsDepthMat.dispose();
+      resources.filterMat.dispose();
+      resources.compositeMat.dispose();
+    };
+  }, [resources]);
+  
+  return null; // All rendering is manual via gl.render
 }
 
 // ── Dust Particle System ────────────────────────────────────────────
@@ -449,7 +623,7 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
   return (
     <>
       <mesh ref={meshRef} material={material} onClick={handleClick} />
-      <DirtSplatCloud simRef={simRef} />
+      <FluidRenderer simRef={simRef} />
       <DustCloud simRef={simRef} />
     </>
   );
