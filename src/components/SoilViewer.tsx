@@ -97,6 +97,7 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
   const fieldRef = useRef<VoxelField | null>(null);
   const simRef = useRef<SoilSimulator | null>(null);
   const meshFrameRef = useRef(0);
+  const settleDetector = useRef(createSettleDetector('soil-terrain'));
 
   const material = useMemo(() => new THREE.ShaderMaterial({
     vertexShader: soilVertexShader,
