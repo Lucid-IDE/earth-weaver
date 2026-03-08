@@ -53,7 +53,8 @@ function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
     [0.48, 0.40, 0.30],  // Loam
   ];
 
-  useFrame(() => {
+  let _logTimer = 0;
+  useFrame((_, dt) => {
     const sim = simRef.current;
     if (!sim || !pointsRef.current) return;
 
@@ -75,7 +76,6 @@ function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
 
       const matType = Math.min(mpm.materialType[i], 5);
       const c = MATERIAL_COLORS[matType];
-      // Moisture darkening on particles
       const m = mpm.moisture ? mpm.moisture[i] : 0;
       const darken = 1 - m * 0.35;
       col[wi]     = c[0] * darken;
@@ -88,6 +88,13 @@ function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
     geometry.setDrawRange(0, count);
     posAttr.needsUpdate = true;
     colAttr.needsUpdate = true;
+
+    // Diagnostic logging
+    _logTimer += dt;
+    if (_logTimer > 2 && count > 0) {
+      _logTimer = 0;
+      console.log(`[Particles] rendering=${count} total=${mpm.numParticles} simActive=${sim.simActive}`);
+    }
   });
 
   return <points ref={pointsRef} geometry={geometry} material={material} />;
