@@ -210,6 +210,9 @@ export default function SoilViewer({ onStats }: { onStats: (s: SoilStats) => voi
       style={{ width: '100%', height: '100%' }}
     >
       <color attach="background" args={['#080c12']} />
+      <ambientLight intensity={0.35} />
+      <directionalLight position={[2, 3, 1]} intensity={0.7} />
+      <directionalLight position={[-1, 2, -2]} intensity={0.3} />
       <SoilTerrain onStats={onStats} />
       <gridHelper args={[2, 24, '#141e2b', '#141e2b']} position={[0, 0.001, 0]} />
       <OrbitControls
