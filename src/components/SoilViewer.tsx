@@ -75,9 +75,12 @@ function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
 
       const matType = Math.min(mpm.materialType[i], 5);
       const c = MATERIAL_COLORS[matType];
-      col[wi]     = c[0];
-      col[wi + 1] = c[1];
-      col[wi + 2] = c[2];
+      // Moisture darkening on particles
+      const m = mpm.moisture ? mpm.moisture[i] : 0;
+      const darken = 1 - m * 0.35;
+      col[wi]     = c[0] * darken;
+      col[wi + 1] = c[1] * darken;
+      col[wi + 2] = c[2] * darken;
 
       count++;
     }
