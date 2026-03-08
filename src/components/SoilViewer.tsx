@@ -93,9 +93,10 @@ function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
   const tmpColor = useMemo(() => new THREE.Color(), []);
   // Pre-generate random properties per particle index
   const particleProps = useMemo(() => {
-    const props = new Float32Array(MAX_PARTICLES * 4); // scale, rotX, rotY, rotZ, geoType, r, g, b
+    // 65536 is MAX_PARTICLES from constants
+    const props = new Float32Array(65536 * 8); // scale, rotX, rotY, rotZ, geoType, r, g, b
     const rng = mulberry32(42);
-    for (let i = 0; i < MAX_PARTICLES; i++) {
+    for (let i = 0; i < 65536; i++) {
       // Scale variation: 0.6x to 1.5x
       props[i*8 + 0] = 0.6 + rng() * 0.9;
       // Rotation
@@ -114,40 +115,86 @@ function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
 
   useFrame(() => {
     const sim = simRef.current;
-    const inst = meshRef.current;
-    if (!sim || !inst) return;
+    if (!sim) return;
 
     const mpm = sim.mpm;
-    let count = 0;
+    
+    // Counts for each of the 4 geometry instances
+    const counts = [0, 0, 0, 0];
+    let totalDisplayed = 0;
 
-    for (let i = 0; i < mpm.numParticles && count < maxDisplay; i++) {
+    for (let i = 0; i < mpm.numParticles && totalDisplayed < maxDisplay; i++) {
       if (!mpm.active[i]) continue;
 
+      const pOff = i * 8;
+      const geoType = particleProps[pOff + 4];
+      const inst = meshRefs[geoType].current;
+      if (!inst) continue;
+
+      const count = counts[geoType];
+      
       const [wx, wy, wz] = mpmToWorld(mpm.px[i], mpm.py[i], mpm.pz[i]);
+      
+      // Add velocity-based stretching for motion blur effect
+      const vx = mpm.vx[i], vy = mpm.vy[i], vz = mpm.vz[i];
+      const speed = Math.sqrt(vx*vx + vy*vy + vz*vz);
+      
       dummy.position.set(wx, wy, wz);
+      
+      // Dynamic rotation: base rotation + velocity-driven tumble
+      dummy.rotation.set(
+        particleProps[pOff + 1] + wy * 100, 
+        particleProps[pOff + 2] + wx * 100, 
+        particleProps[pOff + 3] + wz * 100
+      );
+      
+      // Dynamic scale: base scale * (1 + stretch along velocity)
+      const baseScale = particleProps[pOff + 0];
+      const stretch = 1.0 + Math.min(speed * 0.5, 2.0);
+      
+      // To stretch along velocity, we'd need to orient it, but for now just scale uniformly
+      // (Proper velocity orientation requires quaternion lookAt which is heavier)
+      dummy.scale.set(baseScale, baseScale * (1 + speed*0.2), baseScale);
+      
       dummy.updateMatrix();
       inst.setMatrixAt(count, dummy.matrix);
 
-      const matType = Math.min(mpm.materialType[i], 5);
+      const matType = Math.min(mpm.materialType[i], 6);
       const base = MATERIAL_COLORS[matType];
       const m = mpm.moisture ? mpm.moisture[i] : 0;
       const darken = 1 - m * 0.35;
-      tmpColor.setRGB(base.r * darken, base.g * darken, base.b * darken);
+      
+      // Base color + moisture + per-particle jitter
+      tmpColor.setRGB(
+        Math.max(0, Math.min(1, base.r * darken + particleProps[pOff + 5])),
+        Math.max(0, Math.min(1, base.g * darken + particleProps[pOff + 6])),
+        Math.max(0, Math.min(1, base.b * darken + particleProps[pOff + 7]))
+      );
       inst.setColorAt(count, tmpColor);
 
-      count++;
+      counts[geoType]++;
+      totalDisplayed++;
     }
 
-    inst.count = count;
-    inst.instanceMatrix.needsUpdate = true;
-    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+    // Update all 4 instanced meshes
+    for (let g = 0; g < CHUNK_TYPES; g++) {
+      const inst = meshRefs[g].current;
+      if (inst) {
+        inst.count = counts[g];
+        inst.instanceMatrix.needsUpdate = true;
+        if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      }
+    }
   });
 
   return (
-    <instancedMesh ref={meshRef} args={[geometry, material, maxDisplay]} frustumCulled={false}>
+    <>
       <ambientLight intensity={0.4} />
       <directionalLight position={[2, 3, 1]} intensity={0.8} />
-    </instancedMesh>
+      {geometries.map((geo, i) => (
+        <instancedMesh key={i} ref={meshRefs[i]} args={[geo, material, maxDisplay]} frustumCulled={false} />
+      ))}
+    </>
   );
 }
 
