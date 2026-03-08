@@ -4,7 +4,10 @@ import type { SoilStats } from '@/components/SoilViewer';
 import DebugOverlay from '@/components/DebugOverlay';
 
 export default function Index() {
-  const [stats, setStats] = useState<SoilStats>({ vertices: 0, triangles: 0, simActive: false });
+  const [stats, setStats] = useState<SoilStats>({
+    vertices: 0, triangles: 0, simActive: false,
+    activeParticles: 0, totalParticles: 0,
+  });
 
   return (
     <div className="w-screen h-screen bg-background relative overflow-hidden">
