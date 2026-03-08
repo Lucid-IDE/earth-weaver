@@ -6,19 +6,19 @@ export const MPM_DX = 1.0 / MPM_GRID;        // cell size in normalized coords
 export const MPM_INV_DX = MPM_GRID;
 
 // Physics — tuned per stability constraints from roundtable analysis
-export const MPM_DT = 4e-4;                   // simulation timestep (was 2e-4, relaxed for speed)
+export const MPM_DT = 2e-4;                   // simulation timestep (small for CFL stability)
 export const MPM_GRAVITY = -9.81;
-export const MPM_STEPS_PER_FRAME = 12;        // substeps per render frame (was 8, increased for CFL)
+export const MPM_STEPS_PER_FRAME = 16;        // substeps per render frame
 
 // Velocity damping — prevents energy buildup and helps settling
-export const MPM_VELOCITY_DAMPING = 0.998;    // per-substep multiplier (1.0 = no damping)
+export const MPM_VELOCITY_DAMPING = 0.985;    // per-substep multiplier (stronger damping prevents blowup)
 
 // Particle limits
 export const MAX_PARTICLES = 65536;
 
 // Default material constants (Lamé parameters for Neo-Hookean)
 // These are now overridden per-material via materialBrain
-export const E_YOUNG = 1.2e4;                 // Young's modulus (reduced from 1.4e4 for stability)
+export const E_YOUNG = 800;                   // Young's modulus (low for granular stability)
 export const NU_POISSON = 0.25;               // Poisson's ratio
 export const MU_0 = E_YOUNG / (2 * (1 + NU_POISSON));
 export const LAMBDA_0 = E_YOUNG * NU_POISSON / ((1 + NU_POISSON) * (1 - 2 * NU_POISSON));

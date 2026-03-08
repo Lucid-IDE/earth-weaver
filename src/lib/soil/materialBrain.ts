@@ -21,31 +21,31 @@ export const SOIL_PRESET_NAMES = [
 const PRESETS: Record<number, SoilProperties> = {
   0: { // Dry Sand — low cohesion, high friction, free-flowing
     frictionAngle: 33 * DEG, cohesion: 0.02, specificWeight: 1.0,
-    moisture: 0.05, youngModulus: 1.2e4, poissonRatio: 0.25, damping: 0.02,
+    moisture: 0.05, youngModulus: 800, poissonRatio: 0.25, damping: 0.15,
   },
   1: { // Wet Clay — high cohesion, low friction, sticky clumps
     frictionAngle: 18 * DEG, cohesion: 0.90, specificWeight: 1.15,
-    moisture: 0.7, youngModulus: 8.0e3, poissonRatio: 0.35, damping: 0.15,
+    moisture: 0.7, youngModulus: 500, poissonRatio: 0.35, damping: 0.25,
   },
   2: { // Silt — moderate everything
     frictionAngle: 27 * DEG, cohesion: 0.18, specificWeight: 1.0,
-    moisture: 0.25, youngModulus: 1.0e4, poissonRatio: 0.28, damping: 0.05,
+    moisture: 0.25, youngModulus: 700, poissonRatio: 0.28, damping: 0.18,
   },
   3: { // Organic/Peat — soft, compressible, damp
     frictionAngle: 22 * DEG, cohesion: 0.35, specificWeight: 0.75,
-    moisture: 0.55, youngModulus: 4.0e3, poissonRatio: 0.3, damping: 0.12,
+    moisture: 0.55, youngModulus: 300, poissonRatio: 0.3, damping: 0.22,
   },
   4: { // Gravel — stiff, heavy, low cohesion, bouncy
     frictionAngle: 35 * DEG, cohesion: 0.05, specificWeight: 1.4,
-    moisture: 0.02, youngModulus: 2.5e4, poissonRatio: 0.18, damping: 0.01,
+    moisture: 0.02, youngModulus: 1500, poissonRatio: 0.18, damping: 0.08,
   },
   5: { // Loam — balanced, gardening soil, moderate moisture
     frictionAngle: 25 * DEG, cohesion: 0.50, specificWeight: 1.05,
-    moisture: 0.4, youngModulus: 7.0e3, poissonRatio: 0.3, damping: 0.08,
+    moisture: 0.4, youngModulus: 500, poissonRatio: 0.3, damping: 0.20,
   },
   6: { // Sandy Silt — between sand and silt
     frictionAngle: 30 * DEG, cohesion: 0.08, specificWeight: 1.0,
-    moisture: 0.1, youngModulus: 1.1e4, poissonRatio: 0.25, damping: 0.03,
+    moisture: 0.1, youngModulus: 750, poissonRatio: 0.25, damping: 0.15,
   },
 };
 

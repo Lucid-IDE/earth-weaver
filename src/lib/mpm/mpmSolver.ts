@@ -530,6 +530,18 @@ function gridToParticle(state: MPMSolverState, dt: number) {
     state.F[fOff + 7] = A[6]*Fold[1] + A[7]*Fold[4] + A[8]*Fold[7];
     state.F[fOff + 8] = A[6]*Fold[2] + A[7]*Fold[5] + A[8]*Fold[8];
 
+    // Clamp deformation gradient to prevent blowup
+    for (let k = 0; k < 9; k++) {
+      const v = state.F[fOff + k];
+      if (!isFinite(v) || Math.abs(v) > 5) {
+        // Reset to identity — particle went unstable
+        initParticleF(state, p);
+        state.vx[p] = 0; state.vy[p] = 0; state.vz[p] = 0;
+        for (let c = 0; c < 9; c++) state.C[cOff + c] = 0;
+        break;
+      }
+    }
+
     // Advect position
     state.px[p] += dt * newVx;
     state.py[p] += dt * newVy;
