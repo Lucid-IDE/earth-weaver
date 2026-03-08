@@ -85,6 +85,8 @@ function DirtSplatCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulat
     const scaleAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS), 1);
     const rotAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS), 1);
     const noiseAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS), 1);
+    const moistureAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SPLATS), 1);
+    moistureAttr.setUsage(THREE.DynamicDrawUsage);
     
     posAttr.setUsage(THREE.DynamicDrawUsage);
     colorAttr.setUsage(THREE.DynamicDrawUsage);
