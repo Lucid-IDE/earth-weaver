@@ -146,6 +146,17 @@ export default function AnalystPanel({ isOpen, onClose, source, metadata = {} }:
                 loadScreenshots();
               }}
             />
+
+            <div className="border-t border-border pt-3">
+              <p className="text-[10px] text-muted-foreground mb-2 font-medium uppercase tracking-wider">Multi-Agent Roundtable</p>
+              <RoundtableView
+                screenshot={selected}
+                onComplete={(analysis) => {
+                  setSelected((prev) => prev ? { ...prev, analysis, model_used: 'roundtable' } : null);
+                  loadScreenshots();
+                }}
+              />
+            </div>
           </div>
         ) : (
           <div className="p-4 space-y-3">
