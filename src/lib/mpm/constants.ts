@@ -18,7 +18,7 @@ export const MAX_PARTICLES = 65536;
 
 // Default material constants (Lamé parameters for Neo-Hookean)
 // These are now overridden per-material via materialBrain
-export const E_YOUNG = 1.2e4;                 // Young's modulus (reduced from 1.4e4 for stability)
+export const E_YOUNG = 800;                   // Young's modulus (low for granular stability)
 export const NU_POISSON = 0.25;               // Poisson's ratio
 export const MU_0 = E_YOUNG / (2 * (1 + NU_POISSON));
 export const LAMBDA_0 = E_YOUNG * NU_POISSON / ((1 + NU_POISSON) * (1 - 2 * NU_POISSON));
