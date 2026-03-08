@@ -215,10 +215,10 @@ fn p2g_2(@builtin(global_invocation_id) id: vec3<u32>) {\r
         densities[id.x] = density;
 
         // ═══ Drucker-Prager Viscoplastic Soil Stress ═══
-        let soilStiffness: f32 = stiffness * 10.0;
-        let soilViscosity: f32 = dynamicViscosity * 50.0;
-        let frictionAngle: f32 = 0.5236;
-        let cohesion_val: f32 = 0.5;
+        let soilStiffness: f32 = stiffness * 0.15;
+        let soilViscosity: f32 = dynamicViscosity * 2000.0;
+        let frictionAngle: f32 = 0.6109;
+        let cohesion_val: f32 = 15.0;
 
         let pressure: f32 = soilStiffness * max(0.0, density / restDensity - 1.0);
 
@@ -371,8 +371,10 @@ fn updateGrid(@builtin(global_invocation_id) id: vec3<u32>) {\r
             floatV /= decodeFixedPoint(cells[id.x].mass);
 
             let strength = smoothstep(r*r, 0., cellSquareDistToMouse) * 0.2;   \r
+            let damping: f32 = 0.97;
+            floatV *= damping;
             cells[id.x].vx = encodeFixedPoint(floatV.x + strength * forceDir.x); \r
-            cells[id.x].vy = encodeFixedPoint(floatV.y + strength * forceDir.y - 0.40 * dt); \r
+            cells[id.x].vy = encodeFixedPoint(floatV.y + strength * forceDir.y - 0.25 * dt); \r
             cells[id.x].vz = encodeFixedPoint(floatV.z + strength * forceDir.z); 
 
             var x: i32 = i32(id.x) / i32(initBoxSize.z) / i32(initBoxSize.y);\r
@@ -1316,7 +1318,7 @@ fn fs(input: FragmentInput) -> @location(0) vec4f {\r
     }\r
 
     let speed = textureSampleLevel(bgTexture, textureSampler, input.uv, 0.0).r;\r
-    let albedo: vec3f = vec3f(0, 70, 250) / 256.;
+    let albedo: vec3f = vec3f(140, 100, 50) / 256.;
 
     let LdotN: f32 = 0.5 * dot(normalWorld, lightDirWorld) + 0.5;\r
     let shadow = exp(-1. * densitySum);
