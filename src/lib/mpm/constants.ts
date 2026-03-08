@@ -5,13 +5,13 @@ export const MPM_GRID = 64;
 export const MPM_DX = 1.0 / MPM_GRID;        // cell size in normalized coords
 export const MPM_INV_DX = MPM_GRID;
 
-// Physics — tuned per stability constraints from roundtable analysis
-export const MPM_DT = 2e-4;                   // simulation timestep (CFL-stable for grid=64)
-export const MPM_GRAVITY = -9.81;
-export const MPM_STEPS_PER_FRAME = 16;        // substeps per render frame (more = smoother)
+// Physics — tuned to match reference MLS-MPM (Hu et al. SIGGRAPH 2018)
+export const MPM_DT = 5e-4;                   // simulation timestep (15x CFL margin)
+export const MPM_GRAVITY = -200;               // gravity in MPM [0,1]³ space (NOT -9.81!)
+export const MPM_STEPS_PER_FRAME = 12;         // substeps per render frame
 
-// Velocity damping — very light, just prevents energy drift
-export const MPM_VELOCITY_DAMPING = 0.9998;   // per-substep (nearly 1.0 = minimal damping)
+// Velocity damping — extremely light; natural dissipation from grid transfer + plasticity
+export const MPM_VELOCITY_DAMPING = 0.9999;    // per-substep (0.9999^12 ≈ 0.999, ~0.1% loss/frame)
 
 // Particle limits
 export const MAX_PARTICLES = 65536;
