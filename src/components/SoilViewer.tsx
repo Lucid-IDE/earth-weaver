@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo, useState } from 'react';
+import { useRef, useEffect, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, ThreeEvent } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
@@ -11,7 +11,88 @@ export interface SoilStats {
   vertices: number;
   triangles: number;
   simActive: boolean;
+  activeParticles: number;
+  totalParticles: number;
 }
+
+// ── Particle Cloud ───────────────────────────────────────────────────
+// Renders active MPM particles as a Three.js Points cloud
+
+function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | null> }) {
+  const pointsRef = useRef<THREE.Points>(null!);
+  const maxDisplay = 65536;
+
+  const geometry = useMemo(() => {
+    const geom = new THREE.BufferGeometry();
+    const positions = new Float32Array(maxDisplay * 3);
+    const colors = new Float32Array(maxDisplay * 3);
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geom.setDrawRange(0, 0);
+    return geom;
+  }, []);
+
+  const material = useMemo(() => new THREE.PointsMaterial({
+    size: 0.008,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.85,
+    sizeAttenuation: true,
+    depthWrite: false,
+  }), []);
+
+  // Material type → color (matching soil shader palette)
+  const MATERIAL_COLORS: [number,number,number][] = [
+    [0.76, 0.70, 0.50],  // Sand
+    [0.52, 0.36, 0.24],  // Clay
+    [0.65, 0.55, 0.40],  // Silt
+    [0.28, 0.22, 0.14],  // Organic
+    [0.58, 0.56, 0.52],  // Gravel
+    [0.48, 0.40, 0.30],  // Loam
+  ];
+
+  useFrame(() => {
+    const sim = simRef.current;
+    if (!sim || !pointsRef.current) return;
+
+    const mpm = sim.mpm;
+    const posAttr = geometry.attributes.position as THREE.BufferAttribute;
+    const colAttr = geometry.attributes.color as THREE.BufferAttribute;
+    const pos = posAttr.array as Float32Array;
+    const col = colAttr.array as Float32Array;
+
+    // Map MPM [0,1]^3 → world coords for rendering
+    const WX_MIN = -0.8, WX_RANGE = 1.6;
+    const WY_MIN = -0.4, WY_RANGE = 0.8;
+    const WZ_MIN = -0.8, WZ_RANGE = 1.6;
+
+    let count = 0;
+    for (let i = 0; i < mpm.numParticles && count < maxDisplay; i++) {
+      if (!mpm.active[i]) continue;
+
+      const wi = count * 3;
+      pos[wi]     = mpm.px[i] * WX_RANGE + WX_MIN;
+      pos[wi + 1] = mpm.py[i] * WY_RANGE + WY_MIN;
+      pos[wi + 2] = mpm.pz[i] * WZ_RANGE + WZ_MIN;
+
+      const matType = Math.min(mpm.materialType[i], 5);
+      const c = MATERIAL_COLORS[matType];
+      col[wi]     = c[0];
+      col[wi + 1] = c[1];
+      col[wi + 2] = c[2];
+
+      count++;
+    }
+
+    geometry.setDrawRange(0, count);
+    posAttr.needsUpdate = true;
+    colAttr.needsUpdate = true;
+  });
+
+  return <points ref={pointsRef} geometry={geometry} material={material} />;
+}
+
+// ── Soil Terrain Mesh ────────────────────────────────────────────────
 
 function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
   const meshRef = useRef<THREE.Mesh>(null!);
@@ -46,10 +127,13 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
     geom.computeBoundingSphere();
     mesh.geometry = geom;
 
+    const sim = simRef.current;
     onStats({
       vertices: data.positions.length / 3,
       triangles: data.indices.length / 3,
-      simActive: simRef.current?.simActive ?? false,
+      simActive: sim?.simActive ?? false,
+      activeParticles: sim?.getActiveParticles() ?? 0,
+      totalParticles: sim?.mpm.numParticles ?? 0,
     });
   }, [onStats]);
 
@@ -84,20 +168,26 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
       }
       if (changed) {
         meshFrameRef.current++;
-        if (meshFrameRef.current % 2 === 0) {
+        if (meshFrameRef.current % 3 === 0) {
           rebuildMesh();
         }
       }
-      // Update sim status in overlay
       onStats({
         vertices: meshRef.current?.geometry?.attributes?.position?.count ?? 0,
         triangles: (meshRef.current?.geometry?.index?.count ?? 0) / 3,
         simActive: sim.simActive,
+        activeParticles: sim.getActiveParticles(),
+        totalParticles: sim.mpm.numParticles,
       });
     }
   });
 
-  return <mesh ref={meshRef} material={material} onClick={handleClick} />;
+  return (
+    <>
+      <mesh ref={meshRef} material={material} onClick={handleClick} />
+      <ParticleCloud simRef={simRef} />
+    </>
+  );
 }
 
 export default function SoilViewer({ onStats }: { onStats: (s: SoilStats) => void }) {
