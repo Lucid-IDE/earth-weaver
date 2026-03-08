@@ -11,6 +11,7 @@ import { onAutoCapture } from '@/lib/analyst/autoCapture';
 import CaptureButton from './CaptureButton';
 import StreamingAnalysis from './StreamingAnalysis';
 import ComparisonView from './ComparisonView';
+import RoundtableView from './RoundtableView';
 
 const CODE_CONTEXT = `// Key solver files:
 // - src/lib/mpm/mpmSolver.ts: MLS-MPM CPU solver with Drucker-Prager return mapping
