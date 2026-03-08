@@ -112,6 +112,18 @@ export function spawnParticlesFromSDF(
         const mat = getMaterialAt(wx, wy, wz);
         const matType = classifyMaterial(mat.frictionAngle, mat.cohesion);
 
+        // Compute SDF gradient for ejection velocity direction
+        const [gx, gy, gz] = field.gradient(ix, iy, iz);
+        const glen = Math.sqrt(gx * gx + gy * gy + gz * gz);
+        // Ejection direction: along SDF gradient (outward from solid)
+        const ejectSpeed = 0.3; // initial velocity pushing particles into the cavity
+        let ejx = 0, ejy = -0.1, ejz = 0; // default: slight downward
+        if (glen > 1e-6) {
+          ejx = (gx / glen) * ejectSpeed;
+          ejy = (gy / glen) * ejectSpeed;
+          ejz = (gz / glen) * ejectSpeed;
+        }
+
         // Spawn multiple jittered particles within this voxel
         for (let pp = 0; pp < PARTICLES_PER_VOXEL; pp++) {
           // Jitter within the voxel in MPM space
@@ -120,7 +132,7 @@ export function spawnParticlesFromSDF(
           const jz = (srand() - 0.5) * VOXEL_SIZE;
           const [pmx, pmy, pmz] = worldToMPM(wx + jx, wy + jy, wz + jz);
 
-          addParticle(
+          const pidx = addParticle(
             solver, pmx, pmy, pmz, matType,
             mat.frictionAngle, mat.cohesion,
             mat.specificWeight,
@@ -128,6 +140,15 @@ export function spawnParticlesFromSDF(
             mat.damping, mat.moisture,
             PARTICLES_PER_VOXEL,
           );
+          // Set initial ejection velocity (in MPM-space scale)
+          if (pidx >= 0) {
+            const worldToMPMScaleX = 1 / (MPM_WORLD_MAX_X - MPM_WORLD_MIN_X);
+            const worldToMPMScaleY = 1 / (MPM_WORLD_MAX_Y - MPM_WORLD_MIN_Y);
+            const worldToMPMScaleZ = 1 / (MPM_WORLD_MAX_Z - MPM_WORLD_MIN_Z);
+            solver.vx[pidx] = ejx * worldToMPMScaleX + (srand() - 0.5) * 0.05;
+            solver.vy[pidx] = ejy * worldToMPMScaleY + (srand() - 0.5) * 0.05;
+            solver.vz[pidx] = ejz * worldToMPMScaleZ + (srand() - 0.5) * 0.05;
+          }
           spawned++;
         }
 
