@@ -173,6 +173,22 @@ export default function Analyst() {
                     load();
                   }}
                 />
+
+                <div className="border-t border-border pt-6">
+                  <h2 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                    <span>🪑</span> Agent Roundtable
+                  </h2>
+                  <p className="text-xs text-muted-foreground mb-4">
+                    Four specialized AI agents analyze this screenshot sequentially, each building on previous insights.
+                  </p>
+                  <RoundtableView
+                    screenshot={selected}
+                    onComplete={(analysis) => {
+                      setSelected((prev) => prev ? { ...prev, analysis, model_used: 'roundtable' } : null);
+                      load();
+                    }}
+                  />
+                </div>
               </div>
             </ScrollArea>
           ) : (
