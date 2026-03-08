@@ -5,21 +5,74 @@ export interface SoilProperties {
   frictionAngle: number;
   cohesion: number;
   specificWeight: number;
+  moisture: number;         // 0 = bone dry, 1 = saturated
+  youngModulus: number;     // per-material stiffness
+  poissonRatio: number;
+  damping: number;          // velocity damping factor
 }
 
+// ── Soil Presets ─────────────────────────────────────────────────────
+// Each preset defines physically distinct behavior
+
+export const SOIL_PRESET_NAMES = [
+  'Dry Sand', 'Wet Clay', 'Silt', 'Organic/Peat', 'Gravel', 'Loam', 'Sandy Silt'
+] as const;
+
 const PRESETS: Record<number, SoilProperties> = {
-  0: { frictionAngle: 32 * DEG, cohesion: 0.03, specificWeight: 1.0 },   // dry sand
-  1: { frictionAngle: 20 * DEG, cohesion: 0.80, specificWeight: 1.1 },   // clay
-  2: { frictionAngle: 28 * DEG, cohesion: 0.15, specificWeight: 1.0 },   // silt
-  3: { frictionAngle: 25 * DEG, cohesion: 0.30, specificWeight: 0.8 },   // organic
-  4: { frictionAngle: 30 * DEG, cohesion: 0.12, specificWeight: 1.3 },   // gravel
-  5: { frictionAngle: 26 * DEG, cohesion: 0.45, specificWeight: 1.05 },  // loam
-  6: { frictionAngle: 30 * DEG, cohesion: 0.08, specificWeight: 1.0 },   // sandy silt
+  0: { // Dry Sand — low cohesion, high friction, free-flowing
+    frictionAngle: 33 * DEG, cohesion: 0.02, specificWeight: 1.0,
+    moisture: 0.05, youngModulus: 1.2e4, poissonRatio: 0.25, damping: 0.02,
+  },
+  1: { // Wet Clay — high cohesion, low friction, sticky clumps
+    frictionAngle: 18 * DEG, cohesion: 0.90, specificWeight: 1.15,
+    moisture: 0.7, youngModulus: 8.0e3, poissonRatio: 0.35, damping: 0.15,
+  },
+  2: { // Silt — moderate everything
+    frictionAngle: 27 * DEG, cohesion: 0.18, specificWeight: 1.0,
+    moisture: 0.25, youngModulus: 1.0e4, poissonRatio: 0.28, damping: 0.05,
+  },
+  3: { // Organic/Peat — soft, compressible, damp
+    frictionAngle: 22 * DEG, cohesion: 0.35, specificWeight: 0.75,
+    moisture: 0.55, youngModulus: 4.0e3, poissonRatio: 0.3, damping: 0.12,
+  },
+  4: { // Gravel — stiff, heavy, low cohesion, bouncy
+    frictionAngle: 35 * DEG, cohesion: 0.05, specificWeight: 1.4,
+    moisture: 0.02, youngModulus: 2.5e4, poissonRatio: 0.18, damping: 0.01,
+  },
+  5: { // Loam — balanced, gardening soil, moderate moisture
+    frictionAngle: 25 * DEG, cohesion: 0.50, specificWeight: 1.05,
+    moisture: 0.4, youngModulus: 7.0e3, poissonRatio: 0.3, damping: 0.08,
+  },
+  6: { // Sandy Silt — between sand and silt
+    frictionAngle: 30 * DEG, cohesion: 0.08, specificWeight: 1.0,
+    moisture: 0.1, youngModulus: 1.1e4, poissonRatio: 0.25, damping: 0.03,
+  },
 };
 
-const GRAVEL_PRESET: SoilProperties = { frictionAngle: 30 * DEG, cohesion: 0.12, specificWeight: 1.3 };
+const GRAVEL_PRESET = PRESETS[4];
 
+// ── Active terrain preset (global for UI switching) ──────────────────
+let _activePresetOverride: number | null = null;
+
+export function setGlobalSoilPreset(presetId: number | null) {
+  _activePresetOverride = presetId;
+}
+
+export function getGlobalSoilPreset(): number | null {
+  return _activePresetOverride;
+}
+
+export function getSoilPreset(id: number): SoilProperties {
+  return PRESETS[id] || PRESETS[6];
+}
+
+// ── Material lookup at world position ────────────────────────────────
 export function getMaterialAt(wx: number, wy: number, wz: number): SoilProperties {
+  // If a global preset override is active, return that everywhere
+  if (_activePresetOverride !== null) {
+    return PRESETS[_activePresetOverride] || PRESETS[0];
+  }
+
   const bnLen = Math.sqrt(0.05 * 0.05 + 1 + 0.03 * 0.03);
   const bnx = 0.05 / bnLen, bny = 1 / bnLen, bnz = 0.03 / bnLen;
 
@@ -35,5 +88,12 @@ export function getMaterialAt(wx: number, wy: number, wz: number): SoilPropertie
   const lens = noise3D(wx * 6, wy * 6, wz * 6, WORLD_SEED);
   if (lens > 0.55) return GRAVEL_PRESET;
 
-  return PRESETS[layerId] || PRESETS[6];
+  // Moisture adjustment by depth — deeper = wetter
+  const preset = { ...(PRESETS[layerId] || PRESETS[6]) };
+  const depthFactor = Math.max(0, Math.min(1, (-wy - 0.05) * 3));
+  preset.moisture = Math.min(1, preset.moisture + depthFactor * 0.3);
+  // Moisture increases cohesion (capillary forces)
+  preset.cohesion *= (1 + preset.moisture * 0.5);
+
+  return preset;
 }

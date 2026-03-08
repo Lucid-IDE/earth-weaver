@@ -1,18 +1,24 @@
 export const soilVertexShader = /* glsl */ `
 attribute float aDisturbanceAge;
+attribute float aMoisture;
 
 varying vec3 vWorldPos;
 varying vec3 vNormal;
 varying float vDisturbanceAge;
+varying float vMoisture;
 varying vec3 vViewDir;
+varying float vDepth;
 
 void main() {
   vec4 worldPos4 = modelMatrix * vec4(position, 1.0);
   vWorldPos = worldPos4.xyz;
   vNormal = normalize(normalMatrix * normal);
   vDisturbanceAge = aDisturbanceAge;
+  vMoisture = aMoisture;
   vViewDir = normalize(cameraPosition - vWorldPos);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vec4 viewPos = modelViewMatrix * vec4(position, 1.0);
+  vDepth = -viewPos.z; // camera-space depth for fog
+  gl_Position = projectionMatrix * viewPos;
 }
 `;
 
@@ -99,7 +105,9 @@ float fbm(vec3 p, int octaves) {
 varying vec3 vWorldPos;
 varying vec3 vNormal;
 varying float vDisturbanceAge;
+varying float vMoisture;
 varying vec3 vViewDir;
+varying float vDepth;
 
 uniform vec3 uLightDir;
 uniform vec3 uLightDir2;
@@ -157,15 +165,29 @@ void main() {
   float grain = snoise(vWorldPos * 50.0) * 0.025;
   baseColor += grain;
 
+  // --- Moisture Darkening ---
+  // Wet soil is darker and more saturated (capillary darkening effect)
+  float moisture = vMoisture;
+  // Depth increases moisture
+  float depthMoisture = max(0.0, min(1.0, (-vWorldPos.y - 0.05) * 3.0));
+  moisture = min(1.0, moisture + depthMoisture * 0.25);
+  // Darken and slightly saturate
+  float moistureDarken = 1.0 - moisture * 0.35;
+  baseColor *= moistureDarken;
+  // Shift toward richer browns when wet
+  vec3 wetTint = vec3(0.35, 0.25, 0.15);
+  baseColor = mix(baseColor, wetTint * moistureDarken, moisture * 0.2);
+
   // --- Cut Face Realism ---
   float freshness = 1.0 - vDisturbanceAge;
   // Fresh cuts are slightly darker and smoother
   baseColor *= mix(1.0, 0.80, freshness);
   float roughness = mix(0.92, 0.55, freshness);
 
-  // Subtle wet sheen on fresh cuts
-  float specPower = mix(16.0, 64.0, freshness);
-  float specStrength = mix(0.02, 0.15, freshness);
+  // Subtle wet sheen on fresh cuts (freshly exposed = wetter)
+  float cutMoisture = max(moisture, freshness * 0.6);
+  float specPower = mix(16.0, 128.0, cutMoisture);
+  float specStrength = mix(0.02, 0.2, cutMoisture);
 
   // --- Lighting ---
   vec3 L1 = normalize(uLightDir);
@@ -178,11 +200,15 @@ void main() {
   vec3 fillLight = vec3(0.6, 0.7, 0.85) * NdotL2 * 0.25;
   float ambient = 0.22;
 
-  // Specular (Blinn-Phong)
+  // Subsurface scattering approximation (light wrapping)
+  float sss = max(0.0, dot(-N, L1)) * 0.08;
+  vec3 sssColor = vec3(0.6, 0.4, 0.2) * sss * (1.0 + moisture);
+
+  // Specular (Blinn-Phong) — stronger when wet
   vec3 H1 = normalize(L1 + V);
   float spec1 = pow(max(dot(N, H1), 0.0), specPower) * specStrength;
 
-  vec3 color = baseColor * (ambient + keyLight + fillLight) + vec3(spec1);
+  vec3 color = baseColor * (ambient + keyLight + fillLight) + vec3(spec1) + sssColor;
 
   // Rim light for depth
   float rim = 1.0 - max(dot(N, V), 0.0);
@@ -191,6 +217,11 @@ void main() {
   // Subtle AO from normal direction (darker underneath)
   float ao = 0.7 + 0.3 * max(dot(N, vec3(0.0, 1.0, 0.0)), 0.0);
   color *= ao;
+
+  // --- Depth Fog ---
+  float fogFactor = 1.0 - exp(-vDepth * 0.4);
+  vec3 fogColor = vec3(0.03, 0.05, 0.07);
+  color = mix(color, fogColor, fogFactor * 0.3);
 
   // Gamma correction
   color = pow(color, vec3(1.0 / 2.2));

@@ -10,6 +10,7 @@ import { svd3x3, svdRecompose } from './svd3';
 import {
   MPM_GRID, MPM_DX, MPM_INV_DX, MPM_DT, MPM_GRAVITY,
   MAX_PARTICLES, MU_0, LAMBDA_0,
+  MPM_VELOCITY_DAMPING,
   MPM_WORLD_MIN_X, MPM_WORLD_MAX_X,
   MPM_WORLD_MIN_Y, MPM_WORLD_MAX_Y,
   MPM_WORLD_MIN_Z, MPM_WORLD_MAX_Z,
@@ -37,6 +38,10 @@ export interface MPMSolverState {
   materialType: Uint8Array;
   frictionAngle: Float32Array;
   cohesion: Float32Array;
+  mu: Float32Array;       // per-particle shear modulus
+  lambda: Float32Array;   // per-particle Lamé first parameter
+  damping: Float32Array;  // per-particle velocity damping
+  moisture: Float32Array;  // per-particle moisture level
   settleCounter: Uint16Array;
   active: Uint8Array;
   numParticles: number;
@@ -63,6 +68,10 @@ export function createSolverState(): MPMSolverState {
     materialType: new Uint8Array(MAX_PARTICLES),
     frictionAngle: new Float32Array(MAX_PARTICLES),
     cohesion: new Float32Array(MAX_PARTICLES),
+    mu: new Float32Array(MAX_PARTICLES),
+    lambda: new Float32Array(MAX_PARTICLES),
+    damping: new Float32Array(MAX_PARTICLES),
+    moisture: new Float32Array(MAX_PARTICLES),
     settleCounter: new Uint16Array(MAX_PARTICLES),
     active: new Uint8Array(MAX_PARTICLES),
     numParticles: 0,
@@ -91,6 +100,10 @@ export function addParticle(
   matType: number,
   friction: number, coh: number,
   particleMass: number = 1.0,
+  youngModulus: number = 1.2e4,
+  poissonRatio: number = 0.25,
+  dampingFactor: number = 0.02,
+  moisture: number = 0.0,
 ): number {
   if (state.numParticles >= MAX_PARTICLES) return -1;
   const i = state.numParticles++;
@@ -101,6 +114,11 @@ export function addParticle(
   state.materialType[i] = matType;
   state.frictionAngle[i] = friction;
   state.cohesion[i] = coh;
+  // Per-material Lamé parameters
+  state.mu[i] = youngModulus / (2 * (1 + poissonRatio));
+  state.lambda[i] = youngModulus * poissonRatio / ((1 + poissonRatio) * (1 - 2 * poissonRatio));
+  state.damping[i] = dampingFactor;
+  state.moisture[i] = moisture;
   state.settleCounter[i] = 0;
   state.active[i] = 1;
   initParticleF(state, i);
@@ -263,8 +281,9 @@ function particleToGrid(state: MPMSolverState, dt: number) {
     // Neo-Hookean Kirchhoff stress: τ = μ(FFᵀ - I) + λ ln(J) I
     // For MLS-MPM we need: stress = -pvol * 4/dx² * τ
     // We compute Cauchy stress σ = τ / J, then multiply
-    const mu = MU_0;
-    const lam = LAMBDA_0;
+    // Per-particle Lamé parameters (from material brain)
+    const mu = state.mu[p] || MU_0;
+    const lam = state.lambda[p] || LAMBDA_0;
 
     // FFᵀ
     const FFt = [
@@ -479,9 +498,11 @@ function gridToParticle(state: MPMSolverState, dt: number) {
       }
     }
 
-    state.vx[p] = newVx;
-    state.vy[p] = newVy;
-    state.vz[p] = newVz;
+    // Apply per-particle velocity damping (moisture + material dependent)
+    const damp = MPM_VELOCITY_DAMPING * (1 - (state.damping[p] || 0));
+    state.vx[p] = newVx * damp;
+    state.vy[p] = newVy * damp;
+    state.vz[p] = newVz * damp;
 
     // Update deformation gradient: F = (I + dt * C) * F_old
     const fOff = p * 9;

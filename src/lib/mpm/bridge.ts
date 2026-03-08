@@ -120,7 +120,13 @@ export function spawnParticlesFromSDF(
           const jz = (srand() - 0.5) * VOXEL_SIZE;
           const [pmx, pmy, pmz] = worldToMPM(wx + jx, wy + jy, wz + jz);
 
-          addParticle(solver, pmx, pmy, pmz, matType, mat.frictionAngle, mat.cohesion, 1.0);
+          addParticle(
+            solver, pmx, pmy, pmz, matType,
+            mat.frictionAngle, mat.cohesion,
+            mat.specificWeight,
+            mat.youngModulus, mat.poissonRatio,
+            mat.damping, mat.moisture,
+          );
           spawned++;
         }
 

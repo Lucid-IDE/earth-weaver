@@ -75,9 +75,12 @@ function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
 
       const matType = Math.min(mpm.materialType[i], 5);
       const c = MATERIAL_COLORS[matType];
-      col[wi]     = c[0];
-      col[wi + 1] = c[1];
-      col[wi + 2] = c[2];
+      // Moisture darkening on particles
+      const m = mpm.moisture ? mpm.moisture[i] : 0;
+      const darken = 1 - m * 0.35;
+      col[wi]     = c[0] * darken;
+      col[wi + 1] = c[1] * darken;
+      col[wi + 2] = c[2] * darken;
 
       count++;
     }
@@ -118,10 +121,23 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
     const data = field.extractMesh();
     if (mesh.geometry) mesh.geometry.dispose();
 
+    // Compute per-vertex moisture from Y position (deeper = wetter)
+    const vertCount = data.positions.length / 3;
+    const moistureArr = new Float32Array(vertCount);
+    for (let i = 0; i < vertCount; i++) {
+      const wy = data.positions[i * 3 + 1];
+      const depthFactor = Math.max(0, Math.min(1, (-wy - 0.05) * 3));
+      const baseMoisture = 0.1 + depthFactor * 0.6;
+      // Fresh cuts are wetter
+      const freshness = 1 - data.disturbanceAges[i];
+      moistureArr[i] = Math.min(1, baseMoisture + freshness * 0.3);
+    }
+
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
     geom.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
     geom.setAttribute('aDisturbanceAge', new THREE.BufferAttribute(data.disturbanceAges, 1));
+    geom.setAttribute('aMoisture', new THREE.BufferAttribute(moistureArr, 1));
     geom.setIndex(new THREE.BufferAttribute(data.indices, 1));
     geom.computeBoundingSphere();
     mesh.geometry = geom;
