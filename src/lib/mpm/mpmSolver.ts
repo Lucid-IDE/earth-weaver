@@ -134,6 +134,19 @@ function gidx(i: number, j: number, k: number): number {
   return i + j * GS + k * GS * GS;
 }
 
+// Inline 3x3 matrix helpers for stress computation
+type Mat3 = [number,number,number,number,number,number,number,number,number];
+function mat3Mul_inline(a: Mat3 | number[], b: Mat3 | number[]): number[] {
+  return [
+    a[0]*b[0]+a[1]*b[3]+a[2]*b[6], a[0]*b[1]+a[1]*b[4]+a[2]*b[7], a[0]*b[2]+a[1]*b[5]+a[2]*b[8],
+    a[3]*b[0]+a[4]*b[3]+a[5]*b[6], a[3]*b[1]+a[4]*b[4]+a[5]*b[7], a[3]*b[2]+a[4]*b[5]+a[5]*b[8],
+    a[6]*b[0]+a[7]*b[3]+a[8]*b[6], a[6]*b[1]+a[7]*b[4]+a[8]*b[7], a[6]*b[2]+a[7]*b[5]+a[8]*b[8],
+  ];
+}
+function mat3T_inline(a: Mat3 | number[]): number[] {
+  return [a[0],a[3],a[6], a[1],a[4],a[7], a[2],a[5],a[8]];
+}
+
 function bsplineWeight(x: number): number {
   const ax = Math.abs(x);
   if (ax < 0.5) return 0.75 - ax * ax;
