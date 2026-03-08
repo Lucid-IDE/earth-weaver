@@ -44,7 +44,7 @@ export class SoilSimulator {
     }
   }
 
-  step(_dt: number): boolean {
+  step(dt: number): boolean {
     if (!this.simActive) return false;
     this.frameCounter++;
 
@@ -53,7 +53,6 @@ export class SoilSimulator {
       if (!this.mpm.active[p]) continue;
       this.particleAge[p]++;
       if (this.particleAge[p] > MAX_PARTICLE_LIFETIME) {
-        // Force deactivate — particle has lived too long
         this.mpm.active[p] = 0;
         this.particleAge[p] = 0;
       }
@@ -61,17 +60,15 @@ export class SoilSimulator {
 
     const activeCount = getActiveParticleCount(this.mpm);
     if (activeCount === 0) {
-      // Compact dead particles before going idle
       this.compactParticles();
       this.idleFrames++;
       if (this.idleFrames > SIM_DEACTIVATE_FRAMES) this.simActive = false;
       return false;
     }
 
-    // Run MPM substeps with SDF collision
-    for (let i = 0; i < MPM_STEPS_PER_FRAME; i++) {
-      mpmStep(this.mpm, MPM_DT, this.field);
-    }
+    // Use the dt passed from the render loop (real frame time)
+    // The simple direct-integration solver is stable at these timesteps
+    mpmStep(this.mpm, dt, this.field);
 
     // Try to deposit settled particles back into SDF
     const deposited = depositParticlesIntoSDF(this.field, this.mpm);
