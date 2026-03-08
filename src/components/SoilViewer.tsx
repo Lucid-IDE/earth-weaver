@@ -48,7 +48,7 @@ const MATERIAL_BASE_COLORS = [
 // Renders particles as large overlapping camera-facing quads with soft
 // edges and procedural noise, creating a cohesive dirt mass appearance.
 function DirtSplatCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | null> }) {
-  const MAX_SPLATS = 16384;
+  const MAX_SPLATS = 32768;
   const meshRef = useRef<THREE.Mesh>(null!);
   
   // Pre-generate per-particle random properties
@@ -56,10 +56,10 @@ function DirtSplatCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulat
     const rng = mulberry32(42);
     const data = new Float32Array(65536 * 4); // scale, rotation, noisePhase, colorJitter
     for (let i = 0; i < 65536; i++) {
-      data[i*4 + 0] = 0.012 + rng() * 0.016; // scale: large enough to overlap (0.012 - 0.028)
+      data[i*4 + 0] = 0.004 + rng() * 0.006; // scale: much smaller splats (0.004 - 0.010) for denser coverage
       data[i*4 + 1] = rng() * Math.PI * 2;    // rotation
       data[i*4 + 2] = rng() * 10.0;           // noise phase
-      data[i*4 + 3] = (rng() - 0.5) * 0.15;  // color jitter
+      data[i*4 + 3] = (rng() - 0.5) * 0.08;  // subtler color jitter
     }
     return data;
   }, []);
