@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import FluidLab from "./pages/FluidLab";
 import SoilLab from "./pages/SoilLab";
+import Analyst from "./pages/Analyst";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -20,6 +21,7 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/fluid" element={<FluidLab />} />
           <Route path="/soil-lab" element={<SoilLab />} />
+          <Route path="/analyst" element={<Analyst />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
