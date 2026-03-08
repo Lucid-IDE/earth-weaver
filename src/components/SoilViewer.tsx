@@ -80,7 +80,6 @@ function ParticleCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
     </instancedMesh>
   );
 }
-}
 
 // ── Soil Terrain Mesh ────────────────────────────────────────────────
 
