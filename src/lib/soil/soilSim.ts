@@ -42,9 +42,9 @@ export class SoilSimulator {
       return false;
     }
 
-    // Run MPM substeps
+    // Run MPM substeps with SDF collision
     for (let i = 0; i < MPM_STEPS_PER_FRAME; i++) {
-      mpmStep(this.mpm, MPM_DT);
+      mpmStep(this.mpm, MPM_DT, this.field);
     }
 
     // Try to deposit settled particles back into SDF

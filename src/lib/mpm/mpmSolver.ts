@@ -4,16 +4,20 @@
 //   - SVD-based Drucker-Prager return mapping
 //   - Full deformation gradient tracking (F, stored per particle)
 //   - APIC affine velocity field (C matrix)
+//   - SDF terrain collision at grid nodes
 
 import { svd3x3, svdRecompose } from './svd3';
 import {
   MPM_GRID, MPM_DX, MPM_INV_DX, MPM_DT, MPM_GRAVITY,
   MAX_PARTICLES, MU_0, LAMBDA_0,
+  MPM_WORLD_MIN_X, MPM_WORLD_MAX_X,
+  MPM_WORLD_MIN_Y, MPM_WORLD_MAX_Y,
+  MPM_WORLD_MIN_Z, MPM_WORLD_MAX_Z,
 } from './constants';
+import { VoxelField } from '../soil/VoxelField';
+import { VOXEL_SIZE, SURFACE_IY } from '../soil/constants';
 
 // ── Particle data ────────────────────────────────────────────────────
-// All stored as flat typed arrays for cache-friendliness
-
 export const enum MaterialType {
   Sand = 0,
   Clay = 1,
@@ -24,22 +28,18 @@ export const enum MaterialType {
 }
 
 export interface MPMSolverState {
-  // Per-particle (max MAX_PARTICLES)
-  px: Float32Array;  py: Float32Array;  pz: Float32Array;   // position
-  vx: Float32Array;  vy: Float32Array;  vz: Float32Array;   // velocity
-  F: Float32Array;   // deformation gradient, 9 floats per particle
-  C: Float32Array;   // APIC affine matrix, 9 floats per particle
+  px: Float32Array;  py: Float32Array;  pz: Float32Array;
+  vx: Float32Array;  vy: Float32Array;  vz: Float32Array;
+  F: Float32Array;
+  C: Float32Array;
   mass: Float32Array;
   volume: Float32Array;
   materialType: Uint8Array;
-  frictionAngle: Float32Array;  // Drucker-Prager friction per particle
+  frictionAngle: Float32Array;
   cohesion: Float32Array;
-  settleCounter: Uint16Array;   // frames below settle velocity
-  active: Uint8Array;           // 1 = alive, 0 = deposited/dead
-
+  settleCounter: Uint16Array;
+  active: Uint8Array;
   numParticles: number;
-
-  // Grid (MPM_GRID^3 * 4 channels: mass, vx, vy, vz)
   gridMass: Float32Array;
   gridVx: Float32Array;
   gridVy: Float32Array;
@@ -73,7 +73,6 @@ export function createSolverState(): MPMSolverState {
   };
 }
 
-// Initialize particle deformation gradient to identity
 export function initParticleF(state: MPMSolverState, idx: number) {
   const off = idx * 9;
   state.F[off + 0] = 1; state.F[off + 1] = 0; state.F[off + 2] = 0;
@@ -81,13 +80,11 @@ export function initParticleF(state: MPMSolverState, idx: number) {
   state.F[off + 6] = 0; state.F[off + 7] = 0; state.F[off + 8] = 1;
 }
 
-// Clear APIC C matrix
 function clearC(state: MPMSolverState, idx: number) {
   const off = idx * 9;
   for (let k = 0; k < 9; k++) state.C[off + k] = 0;
 }
 
-// Add a particle. Returns index or -1 if full.
 export function addParticle(
   state: MPMSolverState,
   x: number, y: number, z: number,
@@ -117,7 +114,6 @@ function gidx(i: number, j: number, k: number): number {
   return i + j * GS + k * GS * GS;
 }
 
-// Quadratic B-spline weight (used in MLS-MPM)
 function bsplineWeight(x: number): number {
   const ax = Math.abs(x);
   if (ax < 0.5) return 0.75 - ax * ax;
@@ -125,12 +121,52 @@ function bsplineWeight(x: number): number {
   return 0;
 }
 
+// ── SDF sampling helpers ─────────────────────────────────────────────
+// Convert MPM grid node to world coordinates
+function gridNodeToWorld(gi: number, gj: number, gk: number): [number, number, number] {
+  const mx = gi * MPM_DX;
+  const my = gj * MPM_DX;
+  const mz = gk * MPM_DX;
+  return [
+    mx * (MPM_WORLD_MAX_X - MPM_WORLD_MIN_X) + MPM_WORLD_MIN_X,
+    my * (MPM_WORLD_MAX_Y - MPM_WORLD_MIN_Y) + MPM_WORLD_MIN_Y,
+    mz * (MPM_WORLD_MAX_Z - MPM_WORLD_MIN_Z) + MPM_WORLD_MIN_Z,
+  ];
+}
+
+// Sample SDF phi at world position, returns normalized phi (-1 to 1) and gradient
+function sampleSDF(field: VoxelField, wx: number, wy: number, wz: number): { phi: number; gx: number; gy: number; gz: number } {
+  // World → voxel index (floating point)
+  const fix = wx / VOXEL_SIZE + field.nx / 2;
+  const fiy = wy / VOXEL_SIZE + SURFACE_IY;
+  const fiz = wz / VOXEL_SIZE + field.nz / 2;
+
+  const ix = Math.round(fix);
+  const iy = Math.round(fiy);
+  const iz = Math.round(fiz);
+
+  if (ix < 0 || ix > field.nx || iy < 0 || iy > field.ny || iz < 0 || iz > field.nz) {
+    return { phi: 1, gx: 0, gy: 1, gz: 0 }; // outside = air
+  }
+
+  const phi = field.phi[field.vidx(ix, iy, iz)] / 32767; // normalize to [-1, 1]
+
+  // Compute gradient for surface normal
+  const [gradX, gradY, gradZ] = field.gradient(
+    Math.max(0, Math.min(field.nx, ix)),
+    Math.max(0, Math.min(field.ny, iy)),
+    Math.max(0, Math.min(field.nz, iz)),
+  );
+
+  return { phi, gx: gradX, gy: gradY, gz: gradZ };
+}
+
 // ── MLS-MPM Step ─────────────────────────────────────────────────────
 
-export function mpmStep(state: MPMSolverState, dt: number = MPM_DT): void {
+export function mpmStep(state: MPMSolverState, dt: number = MPM_DT, field?: VoxelField): void {
   clearGrid(state);
   particleToGrid(state, dt);
-  gridUpdate(state, dt);
+  gridUpdate(state, dt, field);
   gridToParticle(state, dt);
 }
 
@@ -302,8 +338,8 @@ function particleToGrid(state: MPMSolverState, dt: number) {
   }
 }
 
-// ── Grid Update: gravity + boundary conditions ───────────────────────
-function gridUpdate(state: MPMSolverState, dt: number) {
+// ── Grid Update: gravity + SDF collision + boundary conditions ───────
+function gridUpdate(state: MPMSolverState, dt: number, field?: VoxelField) {
   const boundary = 3;
 
   for (let k = 0; k < GS; k++) {
@@ -322,7 +358,48 @@ function gridUpdate(state: MPMSolverState, dt: number) {
         // Apply gravity
         vy += MPM_GRAVITY * dt;
 
-        // Boundary: sticky walls, slip floor
+        // ── SDF terrain collision ────────────────────────────
+        if (field) {
+          const [wx, wy, wz] = gridNodeToWorld(i, j, k);
+          const sdf = sampleSDF(field, wx, wy, wz);
+
+          // phi < 0 means inside solid terrain
+          if (sdf.phi < 0) {
+            const glen = Math.sqrt(sdf.gx * sdf.gx + sdf.gy * sdf.gy + sdf.gz * sdf.gz);
+            if (glen > 1e-6) {
+              // Surface normal points outward (toward air = positive phi)
+              const nx = sdf.gx / glen;
+              const ny = sdf.gy / glen;
+              const nz = sdf.gz / glen;
+
+              // Velocity component into the solid (negative = penetrating)
+              const vDotN = vx * nx + vy * ny + vz * nz;
+
+              if (vDotN < 0) {
+                // Remove normal component (no-penetration)
+                vx -= vDotN * nx;
+                vy -= vDotN * ny;
+                vz -= vDotN * nz;
+
+                // Apply friction to tangential component
+                const frictionCoeff = 0.5;
+                const tvx = vx - (vx * nx + vy * ny + vz * nz) * nx; // should be ~0 normal now
+                const tvy = vy - (vx * nx + vy * ny + vz * nz) * ny;
+                const tvz = vz - (vx * nx + vy * ny + vz * nz) * nz;
+                const tSpeed = Math.sqrt(tvx * tvx + tvy * tvy + tvz * tvz);
+                if (tSpeed > 1e-8) {
+                  const frictionForce = Math.min(frictionCoeff * Math.abs(vDotN), tSpeed);
+                  const scale = 1 - frictionForce / tSpeed;
+                  vx = (vx - tvx) + tvx * scale;
+                  vy = (vy - tvy) + tvy * scale;
+                  vz = (vz - tvz) + tvz * scale;
+                }
+              }
+            }
+          }
+        }
+
+        // Domain boundary: sticky walls, slip floor
         if (i < boundary || i >= GS - boundary) vx = 0;
         if (k < boundary || k >= GS - boundary) vz = 0;
         if (j < boundary) {

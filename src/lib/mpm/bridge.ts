@@ -1,12 +1,12 @@
 // ── SDF ↔ MPM Particle Bridge ────────────────────────────────────────
 // Handles the two-way conversion between the static SDF voxel field and
 // dynamic MLS-MPM particles:
-//   1. SPAWN: Detect unstable SDF surface voxels → create particles, carve SDF
+//   1. SPAWN: Dense shell of particles along newly exposed cavity surface
 //   2. DEPOSIT: Detect settled particles → write back into SDF, deactivate
 
 import { VoxelField } from '../soil/VoxelField';
 import { getMaterialAt } from '../soil/materialBrain';
-import { VOXEL_SIZE, GRID_X, GRID_Y, GRID_Z, SURFACE_IY, DEG } from '../soil/constants';
+import { VOXEL_SIZE, GRID_X, GRID_Z, SURFACE_IY, DEG } from '../soil/constants';
 import {
   MPMSolverState, addParticle, MaterialType,
 } from './mpmSolver';
@@ -19,7 +19,6 @@ import {
 } from './constants';
 
 // ── World ↔ MPM coordinate mapping ──────────────────────────────────
-// SDF world coords → MPM normalized [0,1]^3
 export function worldToMPM(wx: number, wy: number, wz: number): [number, number, number] {
   return [
     (wx - MPM_WORLD_MIN_X) / (MPM_WORLD_MAX_X - MPM_WORLD_MIN_X),
@@ -28,7 +27,6 @@ export function worldToMPM(wx: number, wy: number, wz: number): [number, number,
   ];
 }
 
-// MPM normalized [0,1]^3 → SDF world coords
 export function mpmToWorld(mx: number, my: number, mz: number): [number, number, number] {
   return [
     mx * (MPM_WORLD_MAX_X - MPM_WORLD_MIN_X) + MPM_WORLD_MIN_X,
@@ -47,73 +45,88 @@ function classifyMaterial(friction: number, cohesion: number): MaterialType {
   return MaterialType.Silt;
 }
 
-// ── SPAWN: SDF → Particles ───────────────────────────────────────────
-// Called after a dig event. Scans disturbed surface voxels, checks
-// Mohr-Coulomb slope stability, and spawns particles from unstable ones.
+// Simple seeded random for jittering particle positions
+let _seed = 12345;
+function srand(): number {
+  _seed = (_seed * 16807 + 0) % 2147483647;
+  return (_seed & 0x7fffffff) / 0x7fffffff;
+}
+
+// ── SPAWN: Dense shell filling along cavity surface ──────────────────
+// Called after a dig event. Scans voxels within the dig radius:
+// - For each solid voxel (phi < 0) that is adjacent to air (phi > 0)
+//   and within SHELL_DEPTH voxels of the newly carved surface:
+//   spawn 2-4 particles at jittered positions, then carve that voxel to air.
+// This creates a dense granular shell that the MPM solver will simulate.
+
+const SHELL_DEPTH = 2;         // how many voxels deep to convert to particles
+const PARTICLES_PER_VOXEL = 3; // density of spawning
 
 export function spawnParticlesFromSDF(
   field: VoxelField,
   solver: MPMSolverState,
-  maxSpawnPerCall: number = 2048,
+  _maxSpawnPerCall: number = 8192,
 ): number {
   const NX = field.nx, NY = field.ny, NZ = field.nz;
   let spawned = 0;
 
-  for (let iz = 1; iz < NZ && spawned < maxSpawnPerCall; iz++) {
-    for (let iy = 1; iy < NY && spawned < maxSpawnPerCall; iy++) {
-      for (let ix = 1; ix < NX && spawned < maxSpawnPerCall; ix++) {
+  // Scan all voxels looking for freshly disturbed ones (disturbanceAge == 0)
+  // that are solid and adjacent to air — these form the cavity shell
+  for (let iz = 1; iz < NZ && spawned < _maxSpawnPerCall; iz++) {
+    for (let iy = 1; iy < NY && spawned < _maxSpawnPerCall; iy++) {
+      for (let ix = 1; ix < NX && spawned < _maxSpawnPerCall; ix++) {
         const idx = field.vidx(ix, iy, iz);
+
+        // Only freshly disturbed voxels
+        if (field.disturbanceAge[idx] !== 0) continue;
+
         const phi = field.phi[idx];
 
-        // Only near-surface solid voxels (recently disturbed)
-        if (phi >= 0 || phi < -8000) continue;
-        if (field.disturbanceAge[idx] > 2) continue; // only freshly disturbed
+        // We want solid voxels near the new surface
+        if (phi >= 0) continue; // already air
 
-        // Must be adjacent to air
-        let hasAir = false;
-        const dirs: [number,number,number][] = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
-        for (const [dx, dy, dz] of dirs) {
-          const ni = ix+dx, nj = iy+dy, nk = iz+dz;
-          if (ni < 0 || ni > NX || nj < 0 || nj > NY || nk < 0 || nk > NZ) continue;
-          if (field.phi[field.vidx(ni, nj, nk)] > 0) { hasAir = true; break; }
+        // Check if adjacent to air (within SHELL_DEPTH)
+        let nearAir = false;
+        for (let sd = 1; sd <= SHELL_DEPTH && !nearAir; sd++) {
+          const dirs: [number,number,number][] = [[sd,0,0],[-sd,0,0],[0,sd,0],[0,-sd,0],[0,0,sd],[0,0,-sd]];
+          for (const [dx, dy, dz] of dirs) {
+            const ni = ix+dx, nj = iy+dy, nk = iz+dz;
+            if (ni < 0 || ni > NX || nj < 0 || nj > NY || nk < 0 || nk > NZ) continue;
+            if (field.phi[field.vidx(ni, nj, nk)] > 0) { nearAir = true; break; }
+          }
         }
-        if (!hasAir) continue;
+        if (!nearAir) continue;
 
-        // Gradient → surface normal
-        const [gx, gy, gz] = field.gradient(ix, iy, iz);
-        const glen = Math.sqrt(gx*gx + gy*gy + gz*gz);
-        if (glen < 10) continue;
-
-        const ny_n = gy / glen; // up component of normal
-
-        // Slope angle
-        const slopeAngle = Math.acos(Math.max(-1, Math.min(1, ny_n)));
-
-        // Material properties
+        // Get world position for this voxel
         const wx = field.worldX(ix);
         const wy = field.worldY(iy);
         const wz = field.worldZ(iz);
-        const mat = getMaterialAt(wx, wy, wz);
 
-        // Mohr-Coulomb: slope must exceed effective friction angle
-        const effAngle = mat.frictionAngle + mat.cohesion * 0.9;
-        if (slopeAngle <= effAngle) continue;
-
-        // Check if in MPM domain
+        // Check if in MPM domain (with margin)
         const [mx, my, mz] = worldToMPM(wx, wy, wz);
-        if (mx < 0.05 || mx > 0.95 || my < 0.05 || my > 0.95 || mz < 0.05 || mz > 0.95) continue;
+        if (mx < 0.06 || mx > 0.94 || my < 0.06 || my > 0.94 || mz < 0.06 || mz > 0.94) continue;
 
-        if (solver.numParticles >= MAX_PARTICLES) return spawned;
+        if (solver.numParticles >= MAX_PARTICLES - PARTICLES_PER_VOXEL) return spawned;
 
-        // Spawn particle
+        // Get material properties
+        const mat = getMaterialAt(wx, wy, wz);
         const matType = classifyMaterial(mat.frictionAngle, mat.cohesion);
-        addParticle(solver, mx, my, mz, matType, mat.frictionAngle, mat.cohesion, 1.0);
 
-        // Carve SDF: make this voxel more air-like
-        field.phi[idx] = Math.min(32767, phi + 12000) as number;
-        field.disturbanceAge[idx] = 0;
+        // Spawn multiple jittered particles within this voxel
+        for (let pp = 0; pp < PARTICLES_PER_VOXEL; pp++) {
+          // Jitter within the voxel in MPM space
+          const jx = (srand() - 0.5) * VOXEL_SIZE;
+          const jy = (srand() - 0.5) * VOXEL_SIZE;
+          const jz = (srand() - 0.5) * VOXEL_SIZE;
+          const [pmx, pmy, pmz] = worldToMPM(wx + jx, wy + jy, wz + jz);
 
-        spawned++;
+          addParticle(solver, pmx, pmy, pmz, matType, mat.frictionAngle, mat.cohesion, 1.0);
+          spawned++;
+        }
+
+        // Carve this voxel to air so the SDF mesh recedes
+        field.phi[idx] = Math.min(32767, Math.max(phi + 20000, 1000)) as number;
+        field.disturbanceAge[idx] = 1; // mark as processed so we don't re-spawn
       }
     }
   }
@@ -121,9 +134,6 @@ export function spawnParticlesFromSDF(
 }
 
 // ── DEPOSIT: Particles → SDF ─────────────────────────────────────────
-// Scans particles. If velocity is below threshold for enough frames,
-// deposits the particle back into the SDF field and deactivates it.
-
 export function depositParticlesIntoSDF(
   field: VoxelField,
   solver: MPMSolverState,

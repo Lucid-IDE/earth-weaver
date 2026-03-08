@@ -31,7 +31,7 @@ export const SETTLE_FRAMES = 30;              // frames below threshold before d
 // World mapping: MPM domain [0,1]^3 maps to SDF world
 export const MPM_WORLD_MIN_X = -0.8;
 export const MPM_WORLD_MAX_X = 0.8;
-export const MPM_WORLD_MIN_Y = -0.4;
-export const MPM_WORLD_MAX_Y = 0.4;
+export const MPM_WORLD_MIN_Y = -0.6;
+export const MPM_WORLD_MAX_Y = 0.2;
 export const MPM_WORLD_MIN_Z = -0.8;
 export const MPM_WORLD_MAX_Z = 0.8;
