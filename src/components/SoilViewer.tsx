@@ -171,10 +171,12 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
 
     const sim = simRef.current;
     if (sim && sim.simActive) {
-      const clampedDt = Math.min(dt, 1 / 30);
+      // Use real frame dt for the simple direct-integration solver
+      // (the full MLS-MPM grid solver needs tiny dt, but direct integration is stable at ~1/120)
+      const subDt = Math.min(dt, 1 / 30) / 4;
       let changed = false;
-      for (let i = 0; i < SIM_ITERATIONS_PER_FRAME; i++) {
-        changed = sim.step(clampedDt / SIM_ITERATIONS_PER_FRAME) || changed;
+      for (let i = 0; i < 4; i++) {
+        changed = sim.step(subDt) || changed;
       }
       if (changed) {
         meshFrameRef.current++;
