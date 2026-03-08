@@ -126,6 +126,7 @@ function DirtSplatCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulat
     const scaleArr = geometry.getAttribute('instanceScale') as THREE.InstancedBufferAttribute;
     const rotArr = geometry.getAttribute('instanceRotation') as THREE.InstancedBufferAttribute;
     const noiseArr = geometry.getAttribute('instanceNoisePhase') as THREE.InstancedBufferAttribute;
+    const moistureArr = geometry.getAttribute('instanceMoisture') as THREE.InstancedBufferAttribute;
     
     let count = 0;
     
@@ -141,30 +142,44 @@ function DirtSplatCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulat
       // Position
       posArr.setXYZ(count, wx, wy, wz);
       
-      // Scale: larger when moving fast (stretchy splats)
-      const rOff = i * 4;
+      // Scale: smaller base, slight motion stretch
+      const rOff = (i % 65536) * 4;
       const baseScale = particleRng[rOff + 0];
-      const motionScale = 1.0 + Math.min(speed * 0.5, 0.8);
+      const motionScale = 1.0 + Math.min(speed * 0.3, 0.5);
       scaleArr.setX(count, baseScale * motionScale);
       
-      // Rotation: base + slight velocity-based twist
-      rotArr.setX(count, particleRng[rOff + 1] + speed * 2.0);
+      // Rotation
+      rotArr.setX(count, particleRng[rOff + 1] + speed * 1.5);
       
       // Noise phase
       noiseArr.setX(count, particleRng[rOff + 2]);
       
-      // Color from material type with moisture and jitter
+      // Color from material type — use stratigraphy-matching palette
       const matType = Math.min(mpm.materialType[i], 6);
       const base = MATERIAL_BASE_COLORS[matType];
       const moisture = mpm.moisture ? mpm.moisture[i] : 0;
-      const darken = 1 - moisture * 0.4;
+      moistureArr.setX(count, moisture);
+      
+      // Depth-based darkening (deeper = darker, matching SDF terrain)
+      const depthFactor = Math.max(0, Math.min(1, (-wy - 0.05) * 3.0));
+      const depthDarken = 1.0 - depthFactor * 0.25;
+      const moistureDarken = 1 - moisture * 0.35;
+      const darken = depthDarken * moistureDarken;
       const jitter = particleRng[rOff + 3];
       
-      colorArr.setXYZW(
-        count,
-        Math.max(0, Math.min(1, base[0] * darken + jitter)),
-        Math.max(0, Math.min(1, base[1] * darken + jitter * 0.8)),
-        Math.max(0, Math.min(1, base[2] * darken + jitter * 0.6)),
+      // Surface proximity organic boost (matching SDF shader)
+      const surfaceProximity = 1.0 - Math.min(1, Math.max(0, (-wy + 0.02) / 0.14));
+      const organicR = 0.22, organicG = 0.18, organicB = 0.10;
+      const organicMix = surfaceProximity * 0.45;
+      
+      const r = ((base[0] * (1 - organicMix) + organicR * organicMix) * darken + jitter);
+      const g = ((base[1] * (1 - organicMix) + organicG * organicMix) * darken + jitter * 0.8);
+      const b = ((base[2] * (1 - organicMix) + organicB * organicMix) * darken + jitter * 0.6);
+      
+      colorArr.setXYZW(count,
+        Math.max(0, Math.min(1, r)),
+        Math.max(0, Math.min(1, g)),
+        Math.max(0, Math.min(1, b)),
         1.0
       );
       
@@ -177,6 +192,7 @@ function DirtSplatCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulat
     scaleArr.needsUpdate = true;
     rotArr.needsUpdate = true;
     noiseArr.needsUpdate = true;
+    moistureArr.needsUpdate = true;
   });
   
   return <mesh ref={meshRef} geometry={geometry} material={material} frustumCulled={false} />;
