@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Brain, Trash2, ChevronRight, ImageIcon, ArrowLeftRight } from 'lucide-react';
+import { X, Brain, Trash2, ChevronRight, ImageIcon, ArrowLeftRight, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
