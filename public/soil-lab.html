@@ -371,8 +371,10 @@ fn updateGrid(@builtin(global_invocation_id) id: vec3<u32>) {\r
             floatV /= decodeFixedPoint(cells[id.x].mass);
 
             let strength = smoothstep(r*r, 0., cellSquareDistToMouse) * 0.2;   \r
+            let damping: f32 = 0.97;
+            floatV *= damping;
             cells[id.x].vx = encodeFixedPoint(floatV.x + strength * forceDir.x); \r
-            cells[id.x].vy = encodeFixedPoint(floatV.y + strength * forceDir.y - 0.40 * dt); \r
+            cells[id.x].vy = encodeFixedPoint(floatV.y + strength * forceDir.y - 0.25 * dt); \r
             cells[id.x].vz = encodeFixedPoint(floatV.z + strength * forceDir.z); 
 
             var x: i32 = i32(id.x) / i32(initBoxSize.z) / i32(initBoxSize.y);\r
