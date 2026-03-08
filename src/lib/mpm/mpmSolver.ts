@@ -194,77 +194,14 @@ function sampleSDF(field: VoxelField, wx: number, wy: number, wz: number): { phi
   return { phi, gx: gradX, gy: gradY, gz: gradZ };
 }
 
-// ── Simple Particle Step (gravity + SDF collision, no grid transfer) ──
-// This replaces the full MLS-MPM P2G/G2P pipeline with direct particle integration
-// to ensure stable basic behavior before adding constitutive model complexity.
+// ── Full MLS-MPM Step: P2G → Grid Update → G2P ──────────────────────
+// Re-enabled full grid-based solver with Fixed Corotated stress + Drucker-Prager
 
 export function mpmStep(state: MPMSolverState, dt: number = MPM_DT, field?: VoxelField): void {
-  const damping = MPM_VELOCITY_DAMPING;
-
-  for (let p = 0; p < state.numParticles; p++) {
-    if (!state.active[p]) continue;
-
-    // Apply gravity
-    state.vy[p] += MPM_GRAVITY * dt;
-
-    // Apply damping
-    const pdamp = damping * (1 - (state.damping[p] || 0));
-    state.vx[p] *= pdamp;
-    state.vy[p] *= pdamp;
-    state.vz[p] *= pdamp;
-
-    // SDF terrain collision (direct particle-level)
-    if (field) {
-      // Convert particle MPM coords to world coords for SDF lookup
-      const wx = state.px[p] * (MPM_WORLD_MAX_X - MPM_WORLD_MIN_X) + MPM_WORLD_MIN_X;
-      const wy = state.py[p] * (MPM_WORLD_MAX_Y - MPM_WORLD_MIN_Y) + MPM_WORLD_MIN_Y;
-      const wz = state.pz[p] * (MPM_WORLD_MAX_Z - MPM_WORLD_MIN_Z) + MPM_WORLD_MIN_Z;
-
-      const sdf = sampleSDF(field, wx, wy, wz);
-
-      if (sdf.phi < 0) {
-        // Inside solid — push out along gradient
-        const glen = Math.sqrt(sdf.gx * sdf.gx + sdf.gy * sdf.gy + sdf.gz * sdf.gz);
-        if (glen > 1e-6) {
-          const nx = sdf.gx / glen;
-          const ny = sdf.gy / glen;
-          const nz = sdf.gz / glen;
-
-          const vDotN = state.vx[p] * nx + state.vy[p] * ny + state.vz[p] * nz;
-          if (vDotN < 0) {
-            // Remove penetrating velocity + friction
-            state.vx[p] -= vDotN * nx;
-            state.vy[p] -= vDotN * ny;
-            state.vz[p] -= vDotN * nz;
-
-            // Tangential friction
-            const friction = 0.4;
-            state.vx[p] *= (1 - friction);
-            state.vy[p] *= (1 - friction);
-            state.vz[p] *= (1 - friction);
-          }
-        }
-      }
-    }
-
-    // Velocity clamp
-    const speed = Math.sqrt(state.vx[p]**2 + state.vy[p]**2 + state.vz[p]**2);
-    if (speed > 2.0) {
-      const s = 2.0 / speed;
-      state.vx[p] *= s; state.vy[p] *= s; state.vz[p] *= s;
-    }
-
-    // Advect
-    state.px[p] += dt * state.vx[p];
-    state.py[p] += dt * state.vy[p];
-    state.pz[p] += dt * state.vz[p];
-
-    // Clamp to domain
-    const margin = 0.05;
-    state.px[p] = Math.max(margin, Math.min(1 - margin, state.px[p]));
-    state.py[p] = Math.max(margin, Math.min(1 - margin, state.py[p]));
-    state.pz[p] = Math.max(margin, Math.min(1 - margin, state.pz[p]));
-  }
+  clearGrid(state);
+  particleToGrid(state, dt);
+  gridUpdate(state, dt, field);
+  gridToParticle(state, dt);
 }
 
 function clearGrid(state: MPMSolverState) {
