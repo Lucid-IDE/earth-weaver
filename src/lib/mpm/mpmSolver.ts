@@ -38,6 +38,10 @@ export interface MPMSolverState {
   materialType: Uint8Array;
   frictionAngle: Float32Array;
   cohesion: Float32Array;
+  mu: Float32Array;       // per-particle shear modulus
+  lambda: Float32Array;   // per-particle Lamé first parameter
+  damping: Float32Array;  // per-particle velocity damping
+  moisture: Float32Array;  // per-particle moisture level
   settleCounter: Uint16Array;
   active: Uint8Array;
   numParticles: number;
