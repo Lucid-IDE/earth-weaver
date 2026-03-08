@@ -215,10 +215,10 @@ fn p2g_2(@builtin(global_invocation_id) id: vec3<u32>) {\r
         densities[id.x] = density;
 
         // ═══ Drucker-Prager Viscoplastic Soil Stress ═══
-        let soilStiffness: f32 = stiffness * 10.0;
-        let soilViscosity: f32 = dynamicViscosity * 50.0;
-        let frictionAngle: f32 = 0.5236;
-        let cohesion_val: f32 = 0.5;
+        let soilStiffness: f32 = stiffness * 0.15;
+        let soilViscosity: f32 = dynamicViscosity * 2000.0;
+        let frictionAngle: f32 = 0.6109;
+        let cohesion_val: f32 = 15.0;
 
         let pressure: f32 = soilStiffness * max(0.0, density / restDensity - 1.0);
 
