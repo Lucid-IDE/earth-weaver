@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Brain, Trash2, ChevronRight, ImageIcon, ArrowLeftRight } from 'lucide-react';
+import { X, Brain, Trash2, ChevronRight, ImageIcon, ArrowLeftRight, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -11,6 +11,7 @@ import { onAutoCapture } from '@/lib/analyst/autoCapture';
 import CaptureButton from './CaptureButton';
 import StreamingAnalysis from './StreamingAnalysis';
 import ComparisonView from './ComparisonView';
+import RoundtableView from './RoundtableView';
 
 const CODE_CONTEXT = `// Key solver files:
 // - src/lib/mpm/mpmSolver.ts: MLS-MPM CPU solver with Drucker-Prager return mapping
@@ -145,6 +146,17 @@ export default function AnalystPanel({ isOpen, onClose, source, metadata = {} }:
                 loadScreenshots();
               }}
             />
+
+            <div className="border-t border-border pt-3">
+              <p className="text-[10px] text-muted-foreground mb-2 font-medium uppercase tracking-wider">Multi-Agent Roundtable</p>
+              <RoundtableView
+                screenshot={selected}
+                onComplete={(analysis) => {
+                  setSelected((prev) => prev ? { ...prev, analysis, model_used: 'roundtable' } : null);
+                  loadScreenshots();
+                }}
+              />
+            </div>
           </div>
         ) : (
           <div className="p-4 space-y-3">
