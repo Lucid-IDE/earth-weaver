@@ -6,9 +6,9 @@ export const MPM_DX = 1.0 / MPM_GRID;        // cell size in normalized coords
 export const MPM_INV_DX = MPM_GRID;
 
 // Physics — tuned per stability constraints from roundtable analysis
-export const MPM_DT = 4e-4;                   // simulation timestep (was 2e-4, relaxed for speed)
+export const MPM_DT = 2e-4;                   // simulation timestep (small for CFL stability)
 export const MPM_GRAVITY = -9.81;
-export const MPM_STEPS_PER_FRAME = 12;        // substeps per render frame (was 8, increased for CFL)
+export const MPM_STEPS_PER_FRAME = 16;        // substeps per render frame
 
 // Velocity damping — prevents energy buildup and helps settling
 export const MPM_VELOCITY_DAMPING = 0.998;    // per-substep multiplier (1.0 = no damping)
