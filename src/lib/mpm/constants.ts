@@ -14,7 +14,7 @@ export const MPM_STEPS_PER_FRAME = 12;         // substeps per render frame
 export const MPM_VELOCITY_DAMPING = 0.9999;    // per-substep (0.9999^12 ≈ 0.999, ~0.1% loss/frame)
 
 // Particle limits
-export const MAX_PARTICLES = 65536;
+export const MAX_PARTICLES = 131072;
 
 // Default material constants (Lamé parameters for Neo-Hookean)
 // These are now overridden per-material via materialBrain
