@@ -524,8 +524,8 @@ function gridToParticle(state: MPMSolverState, dt: number) {
       }
     }
 
-    // Apply per-particle velocity damping (moisture + material dependent)
-    const damp = MPM_VELOCITY_DAMPING * (1 - (state.damping[p] || 0));
+    // Light velocity damping — just prevents energy drift, NOT killing motion
+    const damp = MPM_VELOCITY_DAMPING;
     newVx *= damp;
     newVy *= damp;
     newVz *= damp;

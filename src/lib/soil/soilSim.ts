@@ -66,9 +66,10 @@ export class SoilSimulator {
       return false;
     }
 
-    // Use the dt passed from the render loop (real frame time)
-    // The simple direct-integration solver is stable at these timesteps
-    mpmStep(this.mpm, dt, this.field);
+    // Run multiple substeps at fixed small dt for CFL stability
+    for (let sub = 0; sub < MPM_STEPS_PER_FRAME; sub++) {
+      mpmStep(this.mpm, MPM_DT, this.field);
+    }
 
     // Try to deposit settled particles back into SDF
     const deposited = depositParticlesIntoSDF(this.field, this.mpm);
