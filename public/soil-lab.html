@@ -607,7 +607,7 @@ async function main(){
     const mwp = getMouseWorldPos();
     const mvel = [mwp[0]-prevMouseWorld[0], mwp[1]-prevMouseWorld[1], mwp[2]-prevMouseWorld[2]];
     const mvelScale = 50;
-    simPData[0]=0.4; simPData[1]=0.3; simPData[2]=mu; simPData[3]=lam;
+    simPData[0]=5e-4; simPData[1]=200.0; simPData[2]=mu; simPData[3]=lam;
     simPData[4]=curMat.phi; simPData[5]=curMat.coh; simPData[6]=15; simPData[7]=mouseDown?1:0;
     simPData[8]=mwp[0]; simPData[9]=mwp[1]; simPData[10]=mwp[2]; simPData[11]=0;
     simPData[12]=mvel[0]*mvelScale; simPData[13]=mvel[1]*mvelScale; simPData[14]=mvel[2]*mvelScale; simPData[15]=0;
