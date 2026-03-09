@@ -13,12 +13,19 @@ import {
   dustFragmentShader,
 } from '@/lib/rendering/dirtShaders';
 import {
-  particleDepthVertexShader,
-  particleDepthFragmentShader,
   fullscreenQuadVertexShader,
   bilateralFilterFragmentShader,
   fluidCompositingFragmentShader,
 } from '@/lib/rendering/fluidShaders';
+
+// Equipment
+import { EquipmentType, ExcavatorState, BulldozerState } from '@/lib/equipment/types';
+import { createExcavatorState, updateExcavator, computeExcavatorFK } from '@/lib/equipment/excavator';
+import { createBulldozerState, updateBulldozer } from '@/lib/equipment/bulldozer';
+import { initControls, pollControls, getExcavatorInputs, getBulldozerInputs } from '@/lib/equipment/controls';
+import { excavatorDig, bulldozerPush } from '@/lib/equipment/terrainInteraction';
+import { craterImpact, explosiveImpact } from '@/lib/equipment/impacts';
+import { ExcavatorMesh, BulldozerMesh } from '@/components/EquipmentRenderer';
 
 export interface SoilStats {
   vertices: number;
@@ -26,6 +33,13 @@ export interface SoilStats {
   simActive: boolean;
   activeParticles: number;
   totalParticles: number;
+}
+
+export interface EquipmentStats {
+  activeEquipment: EquipmentType;
+  excavator: ExcavatorState;
+  bulldozer: BulldozerState;
+  impactMode: string | null;
 }
 
 // ── Seeded RNG ──────────────────────────────────────────────────────
@@ -40,20 +54,16 @@ function mulberry32(a: number) {
 
 // ── Material color palette ──────────────────────────────────────────
 const MATERIAL_BASE_COLORS = [
-  [0.76, 0.70, 0.50],  // Sand
-  [0.52, 0.36, 0.24],  // Clay
-  [0.65, 0.55, 0.40],  // Silt
-  [0.28, 0.22, 0.14],  // Organic
-  [0.58, 0.56, 0.52],  // Gravel
-  [0.48, 0.40, 0.30],  // Loam
-  [0.60, 0.50, 0.35],  // Sandy Silt
+  [0.76, 0.70, 0.50],
+  [0.52, 0.36, 0.24],
+  [0.65, 0.55, 0.40],
+  [0.28, 0.22, 0.14],
+  [0.58, 0.56, 0.52],
+  [0.48, 0.40, 0.30],
+  [0.60, 0.50, 0.35],
 ];
 
 // ── Screen-Space Fluid Renderer ─────────────────────────────────────
-// Multi-pass pipeline that renders particles into a continuous surface:
-// 1. Depth pass: particles as spherical impostors → depth + color texture
-// 2. Bilateral filter (2-pass separable): smooths depth to merge particles
-// 3. Compositing: reconstruct normals from smoothed depth, shade with SDF material
 function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | null> }) {
   const MAX_PARTICLES_RENDER = 131072;
   const { gl, camera, size } = useThree();
@@ -62,68 +72,19 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
     const w = Math.max(size.width, 1);
     const h = Math.max(size.height, 1);
     
-    // ── Render targets ──
     const depthTarget = new THREE.WebGLRenderTarget(w, h, {
-      minFilter: THREE.NearestFilter,
-      magFilter: THREE.NearestFilter,
-      format: THREE.RGBAFormat,
-      type: THREE.FloatType,
-      depthBuffer: true,
+      minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+      format: THREE.RGBAFormat, type: THREE.FloatType, depthBuffer: true,
     });
-    
     const filterTargetH = new THREE.WebGLRenderTarget(w, h, {
-      minFilter: THREE.LinearFilter,
-      magFilter: THREE.LinearFilter,
-      format: THREE.RGBAFormat,
-      type: THREE.FloatType,
+      minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat, type: THREE.FloatType,
     });
-    
     const filterTargetV = new THREE.WebGLRenderTarget(w, h, {
-      minFilter: THREE.LinearFilter,
-      magFilter: THREE.LinearFilter,
-      format: THREE.RGBAFormat,
-      type: THREE.FloatType,
+      minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat, type: THREE.FloatType,
     });
     
-    // ── Point sprite geometry for depth pass ──
-    const pointGeo = new THREE.BufferGeometry();
-    const posAttr = new THREE.BufferAttribute(new Float32Array(MAX_PARTICLES_RENDER * 3), 3);
-    const radAttr = new THREE.BufferAttribute(new Float32Array(MAX_PARTICLES_RENDER), 1);
-    const colAttr = new THREE.BufferAttribute(new Float32Array(MAX_PARTICLES_RENDER * 4), 4);
-    posAttr.setUsage(THREE.DynamicDrawUsage);
-    radAttr.setUsage(THREE.DynamicDrawUsage);
-    colAttr.setUsage(THREE.DynamicDrawUsage);
-    pointGeo.setAttribute('position', posAttr); // needed but overridden by instancePosition
-    
-    // For points mode, we use position directly
-    const depthMat = new THREE.ShaderMaterial({
-      vertexShader: particleDepthVertexShader,
-      fragmentShader: particleDepthFragmentShader,
-      uniforms: {
-        near: { value: 0.005 },
-        far: { value: 10 },
-      },
-      depthTest: true,
-      depthWrite: true,
-    });
-    
-    // Use instanced points via custom attribute
-    const instancedGeo = new THREE.InstancedBufferGeometry();
-    // Single point vertex
-    instancedGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, 0, 0]), 3));
-    const instancePosAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PARTICLES_RENDER * 3), 3);
-    const instanceRadiusAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PARTICLES_RENDER), 1);
-    const instanceColorAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PARTICLES_RENDER * 4), 4);
-    instancePosAttr.setUsage(THREE.DynamicDrawUsage);
-    instanceRadiusAttr.setUsage(THREE.DynamicDrawUsage);
-    instanceColorAttr.setUsage(THREE.DynamicDrawUsage);
-    instancedGeo.setAttribute('instancePosition', instancePosAttr);
-    instancedGeo.setAttribute('instanceRadius', instanceRadiusAttr);
-    instancedGeo.setAttribute('instanceColor', instanceColorAttr);
-    instancedGeo.instanceCount = 0;
-    
-    // Actually we need gl_PointSize — use Points with a custom ShaderMaterial
-    // Let's use a simpler approach: regular Points geometry
     const pointsGeo = new THREE.BufferGeometry();
     const pPositions = new Float32Array(MAX_PARTICLES_RENDER * 3);
     const pColors = new Float32Array(MAX_PARTICLES_RENDER * 4);
@@ -135,22 +96,18 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
     (pointsGeo.attributes.instanceColor as THREE.BufferAttribute).setUsage(THREE.DynamicDrawUsage);
     (pointsGeo.attributes.instanceRadius as THREE.BufferAttribute).setUsage(THREE.DynamicDrawUsage);
     
-    // Depth material for Points
     const pointsDepthMat = new THREE.ShaderMaterial({
       vertexShader: /* glsl */ `
         attribute vec4 instanceColor;
         attribute float instanceRadius;
-        
         varying vec3 vViewPosition;
         varying float vRadius;
         varying vec3 vColor;
-        
         void main() {
             vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
             vViewPosition = mvPosition.xyz;
             vColor = instanceColor.rgb;
             vRadius = instanceRadius;
-            
             float screenRadius = instanceRadius * (800.0 / length(mvPosition.xyz));
             gl_PointSize = max(screenRadius, 1.0);
             gl_Position = projectionMatrix * mvPosition;
@@ -160,40 +117,29 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
         varying vec3 vViewPosition;
         varying float vRadius;
         varying vec3 vColor;
-        
         uniform float near;
         uniform float far;
-        
         void main() {
             vec2 coord = gl_PointCoord * 2.0 - 1.0;
             float r2 = dot(coord, coord);
             if (r2 > 1.0) discard;
-            
             float z = sqrt(1.0 - r2);
             float depth = vViewPosition.z + z * vRadius;
             float linearDepth = (-depth - near) / (far - near);
-            
             gl_FragColor = vec4(linearDepth, vColor);
-            
             vec4 clipPos = projectionMatrix * vec4(vViewPosition.xy, depth, 1.0);
             float ndc = clipPos.z / clipPos.w;
             gl_FragDepth = (ndc + 1.0) * 0.5;
         }
       `,
-      uniforms: {
-        near: { value: 0.005 },
-        far: { value: 10.0 },
-      },
-      depthTest: true,
-      depthWrite: true,
+      uniforms: { near: { value: 0.005 }, far: { value: 10.0 } },
+      depthTest: true, depthWrite: true,
     });
     
     const pointsMesh = new THREE.Points(pointsGeo, pointsDepthMat);
     pointsMesh.frustumCulled = false;
     
-    // ── Fullscreen quad for filter/composite passes ──
     const quadGeo = new THREE.PlaneGeometry(2, 2);
-    
     const filterMat = new THREE.ShaderMaterial({
       vertexShader: fullscreenQuadVertexShader,
       fragmentShader: bilateralFilterFragmentShader,
@@ -204,8 +150,7 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
         blurScale: { value: 1.5 },
         blurDepthFalloff: { value: 100.0 },
       },
-      depthTest: false,
-      depthWrite: false,
+      depthTest: false, depthWrite: false,
     });
     
     const compositeMat = new THREE.ShaderMaterial({
@@ -214,27 +159,18 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
       uniforms: {
         smoothedDepthTexture: { value: null },
         resolution: { value: new THREE.Vector2(w, h) },
-        near: { value: 0.005 },
-        far: { value: 10.0 },
+        near: { value: 0.005 }, far: { value: 10.0 },
         invProjectionMatrix: { value: new THREE.Matrix4() },
       },
-      depthTest: false,
-      depthWrite: false,
-      transparent: true,
-      blending: THREE.NormalBlending,
+      depthTest: false, depthWrite: false,
+      transparent: true, blending: THREE.NormalBlending,
     });
     
-    const filterQuad = new THREE.Mesh(quadGeo, filterMat);
-    const compositeQuad = new THREE.Mesh(quadGeo, compositeMat);
-    
     const filterScene = new THREE.Scene();
-    filterScene.add(filterQuad);
-    
+    filterScene.add(new THREE.Mesh(quadGeo, filterMat));
     const compositeScene = new THREE.Scene();
-    compositeScene.add(compositeQuad);
-    
+    compositeScene.add(new THREE.Mesh(quadGeo, compositeMat));
     const orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    
     const depthScene = new THREE.Scene();
     depthScene.add(pointsMesh);
     
@@ -243,12 +179,10 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
       pointsGeo, pointsMesh, pointsDepthMat,
       filterMat, compositeMat,
       filterScene, compositeScene, depthScene,
-      orthoCamera,
-      pPositions, pColors, pRadii,
+      orthoCamera, pPositions, pColors, pRadii,
     };
   }, []);
   
-  // Handle resize
   useEffect(() => {
     const w = Math.max(size.width, 1);
     const h = Math.max(size.height, 1);
@@ -259,13 +193,12 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
     resources.compositeMat.uniforms.resolution.value.set(w, h);
   }, [size.width, size.height, resources]);
   
-  // Pre-generate particle random data
   const particleRng = useMemo(() => {
     const rng = mulberry32(42);
-    const data = new Float32Array(131072 * 2); // radius, colorJitter
+    const data = new Float32Array(131072 * 2);
     for (let i = 0; i < 131072; i++) {
-      data[i*2 + 0] = 0.003 + rng() * 0.005; // radius 0.003-0.008
-      data[i*2 + 1] = (rng() - 0.5) * 0.06;  // color jitter
+      data[i*2] = 0.003 + rng() * 0.005;
+      data[i*2+1] = (rng() - 0.5) * 0.06;
     }
     return data;
   }, []);
@@ -273,44 +206,30 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
   useFrame(() => {
     const sim = simRef.current;
     if (!sim) return;
-    
     const mpm = sim.mpm;
     const { pPositions, pColors, pRadii, pointsGeo } = resources;
-    
     let count = 0;
     
     for (let i = 0; i < mpm.numParticles && count < MAX_PARTICLES_RENDER; i++) {
       if (!mpm.active[i]) continue;
-      
       const [wx, wy, wz] = mpmToWorld(mpm.px[i], mpm.py[i], mpm.pz[i]);
-      
-      pPositions[count * 3] = wx;
-      pPositions[count * 3 + 1] = wy;
-      pPositions[count * 3 + 2] = wz;
-      
+      pPositions[count*3] = wx;
+      pPositions[count*3+1] = wy;
+      pPositions[count*3+2] = wz;
       const rOff = (i % 131072) * 2;
       pRadii[count] = particleRng[rOff];
-      
-      // Color from material type with depth/moisture adjustments
       const matType = Math.min(mpm.materialType[i], 6);
       const base = MATERIAL_BASE_COLORS[matType];
       const moisture = mpm.moisture ? mpm.moisture[i] : 0;
-      
       const depthFactor = Math.max(0, Math.min(1, (-wy - 0.05) * 3.0));
-      const depthDarken = 1.0 - depthFactor * 0.25;
-      const moistureDarken = 1 - moisture * 0.35;
-      const darken = depthDarken * moistureDarken;
+      const darken = (1.0 - depthFactor * 0.25) * (1 - moisture * 0.35);
       const jitter = particleRng[rOff + 1];
-      
-      // Surface proximity organic boost
       const surfaceProximity = 1.0 - Math.min(1, Math.max(0, (-wy + 0.02) / 0.14));
       const organicMix = surfaceProximity * 0.45;
-      
-      pColors[count * 4] = Math.max(0, Math.min(1, (base[0] * (1 - organicMix) + 0.22 * organicMix) * darken + jitter));
-      pColors[count * 4 + 1] = Math.max(0, Math.min(1, (base[1] * (1 - organicMix) + 0.18 * organicMix) * darken + jitter * 0.8));
-      pColors[count * 4 + 2] = Math.max(0, Math.min(1, (base[2] * (1 - organicMix) + 0.10 * organicMix) * darken + jitter * 0.6));
-      pColors[count * 4 + 3] = 1.0;
-      
+      pColors[count*4] = Math.max(0, Math.min(1, (base[0]*(1-organicMix) + 0.22*organicMix)*darken + jitter));
+      pColors[count*4+1] = Math.max(0, Math.min(1, (base[1]*(1-organicMix) + 0.18*organicMix)*darken + jitter*0.8));
+      pColors[count*4+2] = Math.max(0, Math.min(1, (base[2]*(1-organicMix) + 0.10*organicMix)*darken + jitter*0.6));
+      pColors[count*4+3] = 1.0;
       count++;
     }
     
@@ -319,44 +238,36 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
     (pointsGeo.attributes.instanceColor as THREE.BufferAttribute).needsUpdate = true;
     (pointsGeo.attributes.instanceRadius as THREE.BufferAttribute).needsUpdate = true;
     
-    // Skip rendering if no particles
     if (count === 0) return;
     
-    // ── Pass 1: Render particle depths ──
     const currentRT = gl.getRenderTarget();
     const currentAutoClear = gl.autoClear;
     gl.autoClear = false;
     
     gl.setRenderTarget(resources.depthTarget);
-    gl.clearColor();
-    gl.clearDepth();
+    gl.clearColor(); gl.clearDepth();
     gl.render(resources.depthScene, camera);
     
-    // ── Pass 2a: Horizontal bilateral filter ──
     resources.filterMat.uniforms.depthTexture.value = resources.depthTarget.texture;
     resources.filterMat.uniforms.filterDirection.value.set(1, 0);
     gl.setRenderTarget(resources.filterTargetH);
     gl.clearColor();
     gl.render(resources.filterScene, resources.orthoCamera);
     
-    // ── Pass 2b: Vertical bilateral filter ──
     resources.filterMat.uniforms.depthTexture.value = resources.filterTargetH.texture;
     resources.filterMat.uniforms.filterDirection.value.set(0, 1);
     gl.setRenderTarget(resources.filterTargetV);
     gl.clearColor();
     gl.render(resources.filterScene, resources.orthoCamera);
     
-    // ── Pass 3: Composite — normal reconstruction + shading ──
     resources.compositeMat.uniforms.smoothedDepthTexture.value = resources.filterTargetV.texture;
     resources.compositeMat.uniforms.invProjectionMatrix.value.copy(camera.projectionMatrixInverse);
     
-    gl.setRenderTarget(currentRT); // back to screen
+    gl.setRenderTarget(currentRT);
     gl.autoClear = currentAutoClear;
-    // Render composite as transparent overlay
     gl.render(resources.compositeScene, resources.orthoCamera);
   });
   
-  // Cleanup
   useEffect(() => {
     return () => {
       resources.depthTarget.dispose();
@@ -369,61 +280,39 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
     };
   }, [resources]);
   
-  return null; // All rendering is manual via gl.render
+  return null;
 }
 
 // ── Dust Particle System ────────────────────────────────────────────
-// Small translucent particles that float up from impacts
 function DustCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | null> }) {
   const MAX_DUST = 2048;
-  
   const dustState = useMemo(() => ({
-    px: new Float32Array(MAX_DUST),
-    py: new Float32Array(MAX_DUST),
-    pz: new Float32Array(MAX_DUST),
-    vx: new Float32Array(MAX_DUST),
-    vy: new Float32Array(MAX_DUST),
-    vz: new Float32Array(MAX_DUST),
-    life: new Float32Array(MAX_DUST), // 0 = dead, 1 = just born
-    scale: new Float32Array(MAX_DUST),
-    count: 0,
-    lastParticleCount: 0,
+    px: new Float32Array(MAX_DUST), py: new Float32Array(MAX_DUST), pz: new Float32Array(MAX_DUST),
+    vx: new Float32Array(MAX_DUST), vy: new Float32Array(MAX_DUST), vz: new Float32Array(MAX_DUST),
+    life: new Float32Array(MAX_DUST), scale: new Float32Array(MAX_DUST),
+    count: 0, lastParticleCount: 0,
   }), []);
   
   const { geometry, material } = useMemo(() => {
     const geo = new THREE.InstancedBufferGeometry();
-    const vertices = new Float32Array([
-      -1, -1, 0,  1, -1, 0,  1, 1, 0,
-      -1, -1, 0,  1, 1, 0,  -1, 1, 0,
-    ]);
-    const uvs = new Float32Array([
-      0, 0,  1, 0,  1, 1,
-      0, 0,  1, 1,  0, 1,
-    ]);
+    const vertices = new Float32Array([-1,-1,0,1,-1,0,1,1,0,-1,-1,0,1,1,0,-1,1,0]);
+    const uvs = new Float32Array([0,0,1,0,1,1,0,0,1,1,0,1]);
     geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
     geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    
     const posAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_DUST * 3), 3);
     const alphaAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_DUST), 1);
     const scaleAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_DUST), 1);
     posAttr.setUsage(THREE.DynamicDrawUsage);
     alphaAttr.setUsage(THREE.DynamicDrawUsage);
     scaleAttr.setUsage(THREE.DynamicDrawUsage);
-    
     geo.setAttribute('instancePosition', posAttr);
     geo.setAttribute('instanceAlpha', alphaAttr);
     geo.setAttribute('instanceScale', scaleAttr);
     geo.instanceCount = 0;
-    
     const mat = new THREE.ShaderMaterial({
-      vertexShader: dustVertexShader,
-      fragmentShader: dustFragmentShader,
-      transparent: true,
-      depthWrite: false,
-      depthTest: true,
-      blending: THREE.AdditiveBlending,
+      vertexShader: dustVertexShader, fragmentShader: dustFragmentShader,
+      transparent: true, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending,
     });
-    
     return { geometry: geo, material: mat };
   }, []);
   
@@ -432,13 +321,10 @@ function DustCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | 
   useFrame((_, dt) => {
     const sim = simRef.current;
     if (!sim) return;
-    
     const mpm = sim.mpm;
     const ds = dustState;
     
-    // Spawn dust from fast-moving particles
     const currentCount = mpm.numParticles;
-    // Spawn burst when new particles appear (dig event)
     if (currentCount > ds.lastParticleCount + 10) {
       const newCount = currentCount - ds.lastParticleCount;
       const spawnCount = Math.min(newCount * 2, 200);
@@ -447,63 +333,53 @@ function DustCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | 
         if (srcIdx >= currentCount) continue;
         const [wx, wy, wz] = mpmToWorld(mpm.px[srcIdx], mpm.py[srcIdx], mpm.pz[srcIdx]);
         const di = ds.count % MAX_DUST;
-        ds.px[di] = wx + (rng() - 0.5) * 0.04;
-        ds.py[di] = wy + (rng() - 0.5) * 0.04;
-        ds.pz[di] = wz + (rng() - 0.5) * 0.04;
-        ds.vx[di] = (rng() - 0.5) * 0.15;
-        ds.vy[di] = rng() * 0.2 + 0.05;
-        ds.vz[di] = (rng() - 0.5) * 0.15;
+        ds.px[di] = wx + (rng()-0.5)*0.04;
+        ds.py[di] = wy + (rng()-0.5)*0.04;
+        ds.pz[di] = wz + (rng()-0.5)*0.04;
+        ds.vx[di] = (rng()-0.5)*0.15;
+        ds.vy[di] = rng()*0.2 + 0.05;
+        ds.vz[di] = (rng()-0.5)*0.15;
         ds.life[di] = 1.0;
-        ds.scale[di] = 0.005 + rng() * 0.015;
+        ds.scale[di] = 0.005 + rng()*0.015;
         ds.count = Math.min(ds.count + 1, MAX_DUST);
       }
     }
     ds.lastParticleCount = currentCount;
     
-    // Also spawn from fast-moving particles (continuous dust trail)
     for (let i = 0; i < mpm.numParticles; i++) {
       if (!mpm.active[i]) continue;
       const speed = Math.sqrt(mpm.vx[i]**2 + mpm.vy[i]**2 + mpm.vz[i]**2);
       if (speed > 0.3 && rng() < 0.05) {
         const [wx, wy, wz] = mpmToWorld(mpm.px[i], mpm.py[i], mpm.pz[i]);
         const di = ds.count % MAX_DUST;
-        ds.px[di] = wx;
-        ds.py[di] = wy;
-        ds.pz[di] = wz;
-        ds.vx[di] = (rng() - 0.5) * 0.08;
-        ds.vy[di] = rng() * 0.1 + 0.02;
-        ds.vz[di] = (rng() - 0.5) * 0.08;
-        ds.life[di] = 0.7 + rng() * 0.3;
-        ds.scale[di] = 0.003 + rng() * 0.008;
+        ds.px[di] = wx; ds.py[di] = wy; ds.pz[di] = wz;
+        ds.vx[di] = (rng()-0.5)*0.08;
+        ds.vy[di] = rng()*0.1 + 0.02;
+        ds.vz[di] = (rng()-0.5)*0.08;
+        ds.life[di] = 0.7 + rng()*0.3;
+        ds.scale[di] = 0.003 + rng()*0.008;
         ds.count = Math.min(ds.count + 1, MAX_DUST);
       }
     }
     
-    // Update dust particles
     const posAttr = geometry.getAttribute('instancePosition') as THREE.InstancedBufferAttribute;
     const alphaAttr = geometry.getAttribute('instanceAlpha') as THREE.InstancedBufferAttribute;
     const scaleAttr = geometry.getAttribute('instanceScale') as THREE.InstancedBufferAttribute;
-    
     const clampedDt = Math.min(dt, 0.033);
     let visibleCount = 0;
     
     for (let i = 0; i < ds.count; i++) {
       if (ds.life[i] <= 0) continue;
-      
-      // Physics
       ds.px[i] += ds.vx[i] * clampedDt;
       ds.py[i] += ds.vy[i] * clampedDt;
       ds.pz[i] += ds.vz[i] * clampedDt;
-      ds.vy[i] -= 0.3 * clampedDt; // slight gravity
-      ds.vx[i] *= 0.98; // air drag
-      ds.vz[i] *= 0.98;
-      ds.life[i] -= clampedDt * 0.8; // fade out over ~1.25s
-      
+      ds.vy[i] -= 0.3 * clampedDt;
+      ds.vx[i] *= 0.98; ds.vz[i] *= 0.98;
+      ds.life[i] -= clampedDt * 0.8;
       if (ds.life[i] <= 0) continue;
-      
       posAttr.setXYZ(visibleCount, ds.px[i], ds.py[i], ds.pz[i]);
       alphaAttr.setX(visibleCount, ds.life[i]);
-      scaleAttr.setX(visibleCount, ds.scale[i] * (1.0 + (1.0 - ds.life[i]) * 2.0)); // expand as fading
+      scaleAttr.setX(visibleCount, ds.scale[i] * (1.0 + (1.0 - ds.life[i]) * 2.0));
       visibleCount++;
     }
     
@@ -516,14 +392,125 @@ function DustCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | 
   return <mesh geometry={geometry} material={material} frustumCulled={false} />;
 }
 
-// ── Soil Terrain Mesh ────────────────────────────────────────────────
+// ── Equipment Controller (inside Canvas) ────────────────────────────
+function EquipmentController({
+  fieldRef, simRef, rebuildMesh,
+  equipmentState,
+}: {
+  fieldRef: React.MutableRefObject<VoxelField | null>;
+  simRef: React.MutableRefObject<SoilSimulator | null>;
+  rebuildMesh: () => void;
+  equipmentState: React.MutableRefObject<{
+    activeEquipment: EquipmentType;
+    excavator: ExcavatorState;
+    bulldozer: BulldozerState;
+    impactMode: string | null;
+  }>;
+}) {
+  useEffect(() => { initControls(); }, []);
+  
+  useFrame((_, dt) => {
+    const field = fieldRef.current;
+    const sim = simRef.current;
+    if (!field || !sim) return;
+    
+    const ctrl = pollControls();
+    const es = equipmentState.current;
+    
+    // Equipment switching
+    if (ctrl.switchToExcavator) es.activeEquipment = 'excavator';
+    if (ctrl.switchToBulldozer) es.activeEquipment = 'bulldozer';
+    if (ctrl.switchToFreeCamera) es.activeEquipment = 'none';
+    
+    const clampedDt = Math.min(dt, 0.033);
+    
+    if (es.activeEquipment === 'excavator') {
+      const inputs = getExcavatorInputs(ctrl);
+      updateExcavator(es.excavator, clampedDt, inputs);
+      
+      // Continuous digging when bucket is moving and in terrain
+      const armActive = Math.abs(inputs.boomInput) + Math.abs(inputs.stickInput) + Math.abs(inputs.bucketInput) > 0;
+      if (armActive) {
+        const didDig = excavatorDig(es.excavator, field, sim);
+        if (didDig) rebuildMesh();
+      }
+    }
+    
+    if (es.activeEquipment === 'bulldozer') {
+      const inputs = getBulldozerInputs(ctrl);
+      updateBulldozer(es.bulldozer, clampedDt, inputs);
+      
+      // Continuous pushing when moving with blade down
+      const isMoving = Math.abs(inputs.leftTrack) + Math.abs(inputs.rightTrack) > 0;
+      if (isMoving) {
+        const didPush = bulldozerPush(es.bulldozer, field, sim);
+        if (didPush) rebuildMesh();
+      }
+    }
+    
+    // Impact triggers
+    if (ctrl.triggerImpact) {
+      // Impact at center of view (or at equipment bucket tip)
+      let pos: [number, number, number] = [0, 0, 0];
+      if (es.activeEquipment === 'excavator') {
+        const fk = computeExcavatorFK(es.excavator);
+        pos = fk.bucketTip;
+      }
+      craterImpact(pos[0], pos[1], pos[2], 0.08, field, sim);
+      rebuildMesh();
+    }
+    
+    if (ctrl.triggerExplosion) {
+      let pos: [number, number, number] = [0, 0, 0];
+      if (es.activeEquipment === 'excavator') {
+        const fk = computeExcavatorFK(es.excavator);
+        pos = fk.bucketTip;
+      }
+      explosiveImpact(pos[0], pos[1], pos[2], 0.12, field, sim);
+      rebuildMesh();
+    }
+  });
+  
+  const es = equipmentState.current;
+  
+  return (
+    <>
+      {es.activeEquipment !== 'none' && (
+        <>
+          <ExcavatorMesh state={es.excavator} />
+          <BulldozerMesh state={es.bulldozer} />
+        </>
+      )}
+      {es.activeEquipment === 'none' && (
+        <>
+          <ExcavatorMesh state={es.excavator} />
+          <BulldozerMesh state={es.bulldozer} />
+        </>
+      )}
+    </>
+  );
+}
 
-function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
+// ── Soil Terrain Mesh ────────────────────────────────────────────────
+function SoilTerrain({ 
+  onStats, 
+  onEquipmentUpdate,
+}: { 
+  onStats: (s: SoilStats) => void;
+  onEquipmentUpdate: (e: EquipmentStats) => void;
+}) {
   const meshRef = useRef<THREE.Mesh>(null!);
   const fieldRef = useRef<VoxelField | null>(null);
   const simRef = useRef<SoilSimulator | null>(null);
   const meshFrameRef = useRef(0);
   const settleDetector = useRef(createSettleDetector('soil-terrain'));
+  
+  const equipmentState = useRef({
+    activeEquipment: 'none' as EquipmentType,
+    excavator: createExcavatorState(),
+    bulldozer: createBulldozerState(),
+    impactMode: null as string | null,
+  });
 
   const material = useMemo(() => new THREE.ShaderMaterial({
     vertexShader: soilVertexShader,
@@ -584,6 +571,8 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
   const handleClick = useCallback((e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
     if (!e.face || !fieldRef.current) return;
+    // Only allow click-dig in free camera mode
+    if (equipmentState.current.activeEquipment !== 'none') return;
 
     const normal = e.face.normal.clone();
     const digPoint = e.point.clone().addScaledVector(normal, -DIG_RADIUS * 0.4);
@@ -591,10 +580,9 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
     rebuildMesh();
     simRef.current?.activate();
 
-    const sim = simRef.current;
     triggerAutoCapture('dig', {
       digPoint: { x: digPoint.x, y: digPoint.y, z: digPoint.z },
-      activeParticles: sim?.getActiveParticles() ?? 0,
+      activeParticles: simRef.current?.getActiveParticles() ?? 0,
     });
   }, [rebuildMesh]);
 
@@ -618,6 +606,14 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
         totalParticles: sim.mpm.numParticles,
       });
     }
+    
+    // Update equipment stats for HUD
+    onEquipmentUpdate({
+      activeEquipment: equipmentState.current.activeEquipment,
+      excavator: equipmentState.current.excavator,
+      bulldozer: equipmentState.current.bulldozer,
+      impactMode: equipmentState.current.impactMode,
+    });
   });
 
   return (
@@ -625,11 +621,27 @@ function SoilTerrain({ onStats }: { onStats: (s: SoilStats) => void }) {
       <mesh ref={meshRef} material={material} onClick={handleClick} />
       <FluidRenderer simRef={simRef} />
       <DustCloud simRef={simRef} />
+      <EquipmentController
+        fieldRef={fieldRef}
+        simRef={simRef}
+        rebuildMesh={rebuildMesh}
+        equipmentState={equipmentState}
+      />
     </>
   );
 }
 
-export default function SoilViewer({ onStats }: { onStats: (s: SoilStats) => void }) {
+export default function SoilViewer({ 
+  onStats, 
+  onEquipmentUpdate,
+}: { 
+  onStats: (s: SoilStats) => void;
+  onEquipmentUpdate?: (e: EquipmentStats) => void;
+}) {
+  const handleEquipmentUpdate = useCallback((e: EquipmentStats) => {
+    onEquipmentUpdate?.(e);
+  }, [onEquipmentUpdate]);
+  
   return (
     <Canvas
       camera={{ position: [0.9, 0.5, 0.9], fov: 42, near: 0.005, far: 10 }}
@@ -640,7 +652,7 @@ export default function SoilViewer({ onStats }: { onStats: (s: SoilStats) => voi
       <ambientLight intensity={0.35} />
       <directionalLight position={[2, 3, 1]} intensity={0.7} />
       <directionalLight position={[-1, 2, -2]} intensity={0.3} />
-      <SoilTerrain onStats={onStats} />
+      <SoilTerrain onStats={onStats} onEquipmentUpdate={handleEquipmentUpdate} />
       <gridHelper args={[2, 24, '#141e2b', '#141e2b']} position={[0, 0.001, 0]} />
       <OrbitControls
         target={[0, -0.1, 0]}
