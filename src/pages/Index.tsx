@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SoilViewer from '@/components/SoilViewer';
-import type { SoilStats } from '@/components/SoilViewer';
+import type { SoilStats, EquipmentStats } from '@/components/SoilViewer';
 import DebugOverlay from '@/components/DebugOverlay';
+import ControlsHUD from '@/components/ControlsHUD';
 import CaptureButton from '@/components/analyst/CaptureButton';
 import AnalystPanel from '@/components/analyst/AnalystPanel';
 import SoilPresetSelector from '@/components/SoilPresetSelector';
@@ -15,12 +16,13 @@ export default function Index() {
     vertices: 0, triangles: 0, simActive: false,
     activeParticles: 0, totalParticles: 0,
   });
+  const [equipmentStats, setEquipmentStats] = useState<EquipmentStats | null>(null);
   const [analystOpen, setAnalystOpen] = useState(false);
 
   return (
     <div className="w-screen h-screen bg-background relative overflow-hidden">
-      <SoilViewer onStats={setStats} />
-      <DebugOverlay stats={stats} />
+      <SoilViewer onStats={setStats} onEquipmentUpdate={setEquipmentStats} />
+      <DebugOverlay stats={stats} equipment={equipmentStats} />
 
       {/* Top-right controls */}
       <div className="absolute top-4 right-4 flex items-center gap-2 z-40">
@@ -44,6 +46,16 @@ export default function Index() {
           Full View →
         </Button>
       </div>
+
+      {/* Controls HUD */}
+      {equipmentStats && (
+        <ControlsHUD
+          activeEquipment={equipmentStats.activeEquipment}
+          excavator={equipmentStats.excavator}
+          bulldozer={equipmentStats.bulldozer}
+          impactMode={equipmentStats.impactMode}
+        />
+      )}
 
       <AnalystPanel
         isOpen={analystOpen}
