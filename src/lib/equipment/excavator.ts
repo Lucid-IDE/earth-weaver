@@ -1,6 +1,7 @@
 // ── Excavator Model & Physics ────────────────────────────────────────
 // Articulated hydraulic excavator with boom/stick/bucket + cab swing
 // Forward kinematics computes bucket tip position for SDF interaction
+// Also provides local-space FK for renderer (avoids double-transform issues)
 
 import { ExcavatorState, DEG } from './types';
 
@@ -20,15 +21,15 @@ export function createExcavatorState(): ExcavatorState {
     },
     boom: {
       angle: -30 * DEG, minAngle: -60 * DEG, maxAngle: 70 * DEG,
-      speed: 0.8, length: 0.25, label: 'Boom',
+      speed: 0.8, length: 0.22, label: 'Boom',
     },
     stick: {
       angle: -100 * DEG, minAngle: -160 * DEG, maxAngle: -30 * DEG,
-      speed: 1.0, length: 0.18, label: 'Stick',
+      speed: 1.0, length: 0.16, label: 'Stick',
     },
     bucket: {
       angle: -20 * DEG, minAngle: -170 * DEG, maxAngle: 30 * DEG,
-      speed: 1.5, length: 0.08, label: 'Bucket',
+      speed: 1.5, length: 0.07, label: 'Bucket',
     },
     hydraulicPressure: 0,
   };
@@ -44,12 +45,12 @@ export function updateExcavator(
   state: ExcavatorState,
   dt: number,
   inputs: {
-    swingInput: number;     // -1 to 1
-    boomInput: number;      // -1 to 1 
-    stickInput: number;     // -1 to 1
-    bucketInput: number;    // -1 to 1
-    leftTrack: number;      // -1 to 1
-    rightTrack: number;     // -1 to 1
+    swingInput: number;
+    boomInput: number;
+    stickInput: number;
+    bucketInput: number;
+    leftTrack: number;
+    rightTrack: number;
   }
 ) {
   // Update joints
@@ -63,7 +64,7 @@ export function updateExcavator(
   clampJoint(state.stick);
   clampJoint(state.bucket);
   
-  // Hydraulic pressure visual (based on arm activity)
+  // Hydraulic pressure visual
   const armActivity = Math.abs(inputs.boomInput) + Math.abs(inputs.stickInput) + Math.abs(inputs.bucketInput);
   state.hydraulicPressure += (Math.min(1, armActivity) - state.hydraulicPressure) * 5 * dt;
   
@@ -87,44 +88,40 @@ export function updateExcavator(
   state.vehicle.posZ = Math.max(-0.7, Math.min(0.7, state.vehicle.posZ));
 }
 
-// Forward kinematics: compute world positions of each joint and the bucket tip
+// ── World-space FK (for terrain interaction) ────────────────────────
 export interface ExcavatorFK {
   cabBase: [number, number, number];
   boomPivot: [number, number, number];
   boomEnd: [number, number, number];
   stickEnd: [number, number, number];
   bucketTip: [number, number, number];
-  bucketTeeth: [number, number, number][];  // 3-5 teeth positions for multi-point dig
+  bucketTeeth: [number, number, number][];
 }
 
 export function computeExcavatorFK(state: ExcavatorState): ExcavatorFK {
   const v = state.vehicle;
   const ch = Math.cos(v.heading);
   const sh = Math.sin(v.heading);
-  const cs = Math.cos(state.swing.angle);
-  const ss = Math.sin(state.swing.angle);
   
-  // Cab sits on vehicle at a height
   const cabHeight = 0.06;
   const cabBase: [number, number, number] = [v.posX, v.posY + cabHeight, v.posZ];
   
-  // Boom pivot at front of cab
-  const pivotOffset = 0.04;
-  const boomPivot: [number, number, number] = [
-    cabBase[0] + (sh * cs + ch * ss) * pivotOffset,
-    cabBase[1] + 0.03,
-    cabBase[2] + (ch * cs - sh * ss) * pivotOffset,
-  ];
-  
-  // Combined heading + swing angle for arm direction
+  // Combined heading + swing for arm direction
   const armHeading = v.heading + state.swing.angle;
   const cah = Math.cos(armHeading);
   const sah = Math.sin(armHeading);
   
-  // Boom end (boom rotates in the vertical plane defined by armHeading)
-  const boomAngle = state.boom.angle;
-  const boomHoriz = Math.cos(boomAngle) * state.boom.length;
-  const boomVert = Math.sin(boomAngle) * state.boom.length;
+  // Boom pivot at front of cab
+  const pivotOffset = 0.04;
+  const boomPivot: [number, number, number] = [
+    cabBase[0] + sah * pivotOffset,
+    cabBase[1] + 0.03,
+    cabBase[2] + cah * pivotOffset,
+  ];
+  
+  // Boom end (rotates in vertical plane along armHeading)
+  const boomHoriz = Math.cos(state.boom.angle) * state.boom.length;
+  const boomVert = Math.sin(state.boom.angle) * state.boom.length;
   const boomEnd: [number, number, number] = [
     boomPivot[0] + sah * boomHoriz,
     boomPivot[1] + boomVert,
@@ -132,7 +129,7 @@ export function computeExcavatorFK(state: ExcavatorState): ExcavatorFK {
   ];
   
   // Stick end
-  const stickAbsAngle = boomAngle + state.stick.angle;
+  const stickAbsAngle = state.boom.angle + state.stick.angle;
   const stickHoriz = Math.cos(stickAbsAngle) * state.stick.length;
   const stickVert = Math.sin(stickAbsAngle) * state.stick.length;
   const stickEnd: [number, number, number] = [
@@ -154,7 +151,7 @@ export function computeExcavatorFK(state: ExcavatorState): ExcavatorFK {
   // Bucket teeth spread perpendicular to arm direction
   const perpX = cah;
   const perpZ = -sah;
-  const teethSpread = 0.025;
+  const teethSpread = 0.02;
   const bucketTeeth: [number, number, number][] = [
     [bucketTip[0] - perpX * teethSpread, bucketTip[1], bucketTip[2] - perpZ * teethSpread],
     [bucketTip[0], bucketTip[1], bucketTip[2]],
@@ -162,4 +159,103 @@ export function computeExcavatorFK(state: ExcavatorState): ExcavatorFK {
   ];
   
   return { cabBase, boomPivot, boomEnd, stickEnd, bucketTip, bucketTeeth };
+}
+
+// ── Local-space FK (for renderer) ───────────────────────────────────
+// Returns positions in the coordinate system of the swing group
+// (i.e., already inside <group pos={vehicle} rot={heading}> <group rot={swing}>)
+// In this space: +Z = forward (arm direction), +Y = up, origin = vehicle base
+export interface ExcavatorLocalFK {
+  boomPivot: [number, number, number];
+  boomEnd: [number, number, number];
+  stickEnd: [number, number, number];
+  bucketTip: [number, number, number];
+  // Hydraulic attachment points
+  boomCylBase: [number, number, number];
+  boomCylEnd: [number, number, number];
+  stickCylBase: [number, number, number];
+  stickCylEnd: [number, number, number];
+  bucketLinkBase: [number, number, number];
+  bucketLinkEnd: [number, number, number];
+}
+
+export function computeExcavatorLocalFK(state: ExcavatorState): ExcavatorLocalFK {
+  // In swing-local space, the arm extends along +Z (forward from cab)
+  const cabHeight = 0.06;
+  const pivotOffset = 0.04;
+  
+  // Boom pivot: front of cab, raised
+  const boomPivot: [number, number, number] = [0, cabHeight + 0.03, pivotOffset];
+  
+  // Boom extends in the YZ plane (Z = forward, Y = up) at boom.angle
+  // boom.angle: 0 = horizontal forward, positive = up, negative = down
+  const boomHoriz = Math.cos(state.boom.angle) * state.boom.length;
+  const boomVert = Math.sin(state.boom.angle) * state.boom.length;
+  const boomEnd: [number, number, number] = [
+    boomPivot[0],
+    boomPivot[1] + boomVert,
+    boomPivot[2] + boomHoriz,
+  ];
+  
+  // Stick
+  const stickAbsAngle = state.boom.angle + state.stick.angle;
+  const stickHoriz = Math.cos(stickAbsAngle) * state.stick.length;
+  const stickVert = Math.sin(stickAbsAngle) * state.stick.length;
+  const stickEnd: [number, number, number] = [
+    boomEnd[0],
+    boomEnd[1] + stickVert,
+    boomEnd[2] + stickHoriz,
+  ];
+  
+  // Bucket tip
+  const bucketAbsAngle = stickAbsAngle + state.bucket.angle;
+  const bucketHoriz = Math.cos(bucketAbsAngle) * state.bucket.length;
+  const bucketVert = Math.sin(bucketAbsAngle) * state.bucket.length;
+  const bucketTip: [number, number, number] = [
+    stickEnd[0],
+    stickEnd[1] + bucketVert,
+    stickEnd[2] + bucketHoriz,
+  ];
+  
+  // Hydraulic cylinder attachment points (realistic locations):
+  
+  // Boom cylinder: base at cab body, end partway up boom
+  const boomCylBase: [number, number, number] = [0.015, cabHeight + 0.01, 0.02];
+  const boomMidFrac = 0.4;
+  const boomCylEnd: [number, number, number] = [
+    0.015,
+    boomPivot[1] + boomVert * boomMidFrac,
+    boomPivot[2] + boomHoriz * boomMidFrac,
+  ];
+  
+  // Stick cylinder: base at mid-boom, end at stick pivot area
+  const stickCylBase: [number, number, number] = [
+    -0.012,
+    boomPivot[1] + boomVert * 0.3,
+    boomPivot[2] + boomHoriz * 0.3,
+  ];
+  const stickCylEnd: [number, number, number] = [
+    -0.012,
+    boomEnd[1] + stickVert * 0.25,
+    boomEnd[2] + stickHoriz * 0.25,
+  ];
+  
+  // Bucket linkage: runs from mid-stick to bucket pivot
+  const bucketLinkBase: [number, number, number] = [
+    0,
+    boomEnd[1] + stickVert * 0.5,
+    boomEnd[2] + stickHoriz * 0.5,
+  ];
+  const bucketLinkEnd: [number, number, number] = [
+    0,
+    stickEnd[1] + bucketVert * 0.3,
+    stickEnd[2] + bucketHoriz * 0.3,
+  ];
+  
+  return {
+    boomPivot, boomEnd, stickEnd, bucketTip,
+    boomCylBase, boomCylEnd,
+    stickCylBase, stickCylEnd,
+    bucketLinkBase, bucketLinkEnd,
+  };
 }

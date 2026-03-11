@@ -1,15 +1,22 @@
 // ── Equipment Input Controller ───────────────────────────────────────
 // Dual joystick keyboard mapping for heavy equipment operation
 //
+// UNIVERSAL MOVEMENT:
+//   Arrow Up/Down = both tracks forward/back (simple drive)
+//   Arrow Left/Right = pivot turn (skid steer)
+//   W/S = left track only, I/K = right track only (independent tracks)
+//
 // EXCAVATOR CONTROLS:
-//   Left Stick (tracks):  W/S = left track, ↑/↓ (or I/K) = right track
-//   Right Stick (arm):    A/D = swing, I/K = boom, J/L = stick
-//   Bucket:               Q/E = curl bucket in/out
-//   
+//   A/D = swing cab left/right
+//   R/F = boom up/down
+//   J/L = stick in/out
+//   Q/E = curl/dump bucket
+//
 // BULLDOZER CONTROLS:
-//   Left Stick (tracks):  W/S = left track, I/K = right track
-//   Right Stick (blade):  R/F = blade up/down, T/G = tilt, Y/H = angle
-//   Rippers:              X = toggle rippers
+//   R/F = blade up/down
+//   T/G = blade tilt left/right
+//   Y/H = blade angle left/right
+//   X = toggle rippers
 
 export interface ControlInputs {
   // Left joystick (tracks)
@@ -17,6 +24,12 @@ export interface ControlInputs {
   leftTrackBackward: boolean;
   rightTrackForward: boolean;
   rightTrackBackward: boolean;
+  
+  // Simple drive (arrow keys move both tracks)
+  bothForward: boolean;
+  bothBackward: boolean;
+  pivotLeft: boolean;
+  pivotRight: boolean;
   
   // Right joystick / arm controls
   swingLeft: boolean;
@@ -52,69 +65,91 @@ const justPressed: Record<string, boolean> = {};
 
 export function initControls() {
   window.addEventListener('keydown', (e) => {
-    if (!keyState[e.key.toLowerCase()]) {
-      justPressed[e.key.toLowerCase()] = true;
+    const key = e.key.toLowerCase() === e.key ? e.key : e.key;
+    const k = e.code || e.key.toLowerCase();
+    if (!keyState[k]) {
+      justPressed[k] = true;
     }
-    keyState[e.key.toLowerCase()] = true;
+    keyState[k] = true;
   });
   
   window.addEventListener('keyup', (e) => {
-    keyState[e.key.toLowerCase()] = false;
+    const k = e.code || e.key.toLowerCase();
+    keyState[k] = false;
   });
 }
 
-function isDown(key: string): boolean {
-  return keyState[key] || false;
+function isDown(code: string): boolean {
+  return keyState[code] || false;
 }
 
-function wasJustPressed(key: string): boolean {
-  const pressed = justPressed[key] || false;
-  justPressed[key] = false;
+function wasJustPressed(code: string): boolean {
+  const pressed = justPressed[code] || false;
+  justPressed[code] = false;
   return pressed;
 }
 
 export function pollControls(): ControlInputs {
   return {
-    // Left stick: W/S = left track, I/K = right track (or arrow keys)
-    leftTrackForward: isDown('w'),
-    leftTrackBackward: isDown('s'),
-    rightTrackForward: isDown('i'),
-    rightTrackBackward: isDown('k'),
+    // Independent tracks: W/S = left, I/K = right
+    leftTrackForward: isDown('KeyW'),
+    leftTrackBackward: isDown('KeyS'),
+    rightTrackForward: isDown('KeyI'),
+    rightTrackBackward: isDown('KeyK'),
     
-    // Right stick: arm
-    swingLeft: isDown('a'),
-    swingRight: isDown('d'),
-    boomUp: isDown('r'),
-    boomDown: isDown('f'),
-    stickIn: isDown('j'),
-    stickOut: isDown('l'),
-    bucketCurl: isDown('q'),
-    bucketDump: isDown('e'),
+    // Arrow keys: both tracks together
+    bothForward: isDown('ArrowUp'),
+    bothBackward: isDown('ArrowDown'),
+    pivotLeft: isDown('ArrowLeft'),
+    pivotRight: isDown('ArrowRight'),
+    
+    // Arm controls
+    swingLeft: isDown('KeyA'),
+    swingRight: isDown('KeyD'),
+    boomUp: isDown('KeyR'),
+    boomDown: isDown('KeyF'),
+    stickIn: isDown('KeyJ'),
+    stickOut: isDown('KeyL'),
+    bucketCurl: isDown('KeyQ'),
+    bucketDump: isDown('KeyE'),
     
     // Blade
-    bladeUp: isDown('r'),
-    bladeDown: isDown('f'),
-    bladeTiltLeft: isDown('t'),
-    bladeTiltRight: isDown('g'),
-    bladeAngleLeft: isDown('y'),
-    bladeAngleRight: isDown('h'),
-    toggleRippers: wasJustPressed('x'),
+    bladeUp: isDown('KeyR'),
+    bladeDown: isDown('KeyF'),
+    bladeTiltLeft: isDown('KeyT'),
+    bladeTiltRight: isDown('KeyG'),
+    bladeAngleLeft: isDown('KeyY'),
+    bladeAngleRight: isDown('KeyH'),
+    toggleRippers: wasJustPressed('KeyX'),
     
     // Equipment switching
-    switchToExcavator: wasJustPressed('1'),
-    switchToBulldozer: wasJustPressed('2'),
-    switchToFreeCamera: wasJustPressed('3'),
+    switchToExcavator: wasJustPressed('Digit1'),
+    switchToBulldozer: wasJustPressed('Digit2'),
+    switchToFreeCamera: wasJustPressed('Digit3'),
     
     // Impact
-    triggerImpact: wasJustPressed('v'),
-    triggerExplosion: wasJustPressed('b'),
+    triggerImpact: wasJustPressed('KeyV'),
+    triggerExplosion: wasJustPressed('KeyB'),
   };
 }
 
 export function getExcavatorInputs(ctrl: ControlInputs) {
+  // Combine independent tracks + arrow keys
+  let leftTrack = (ctrl.leftTrackForward ? 1 : 0) + (ctrl.leftTrackBackward ? -1 : 0);
+  let rightTrack = (ctrl.rightTrackForward ? 1 : 0) + (ctrl.rightTrackBackward ? -1 : 0);
+  
+  // Arrow keys: forward/back = both tracks, left/right = pivot
+  if (ctrl.bothForward) { leftTrack += 1; rightTrack += 1; }
+  if (ctrl.bothBackward) { leftTrack -= 1; rightTrack -= 1; }
+  if (ctrl.pivotLeft) { leftTrack -= 1; rightTrack += 1; }
+  if (ctrl.pivotRight) { leftTrack += 1; rightTrack -= 1; }
+  
+  leftTrack = Math.max(-1, Math.min(1, leftTrack));
+  rightTrack = Math.max(-1, Math.min(1, rightTrack));
+  
   return {
-    leftTrack: (ctrl.leftTrackForward ? 1 : 0) + (ctrl.leftTrackBackward ? -1 : 0),
-    rightTrack: (ctrl.rightTrackForward ? 1 : 0) + (ctrl.rightTrackBackward ? -1 : 0),
+    leftTrack,
+    rightTrack,
     swingInput: (ctrl.swingRight ? 1 : 0) + (ctrl.swingLeft ? -1 : 0),
     boomInput: (ctrl.boomUp ? 1 : 0) + (ctrl.boomDown ? -1 : 0),
     stickInput: (ctrl.stickIn ? 1 : 0) + (ctrl.stickOut ? -1 : 0),
@@ -123,9 +158,20 @@ export function getExcavatorInputs(ctrl: ControlInputs) {
 }
 
 export function getBulldozerInputs(ctrl: ControlInputs) {
+  let leftTrack = (ctrl.leftTrackForward ? 1 : 0) + (ctrl.leftTrackBackward ? -1 : 0);
+  let rightTrack = (ctrl.rightTrackForward ? 1 : 0) + (ctrl.rightTrackBackward ? -1 : 0);
+  
+  if (ctrl.bothForward) { leftTrack += 1; rightTrack += 1; }
+  if (ctrl.bothBackward) { leftTrack -= 1; rightTrack -= 1; }
+  if (ctrl.pivotLeft) { leftTrack -= 1; rightTrack += 1; }
+  if (ctrl.pivotRight) { leftTrack += 1; rightTrack -= 1; }
+  
+  leftTrack = Math.max(-1, Math.min(1, leftTrack));
+  rightTrack = Math.max(-1, Math.min(1, rightTrack));
+  
   return {
-    leftTrack: (ctrl.leftTrackForward ? 1 : 0) + (ctrl.leftTrackBackward ? -1 : 0),
-    rightTrack: (ctrl.rightTrackForward ? 1 : 0) + (ctrl.rightTrackBackward ? -1 : 0),
+    leftTrack,
+    rightTrack,
     bladeUp: (ctrl.bladeUp ? 1 : 0) + (ctrl.bladeDown ? -1 : 0),
     bladeTiltInput: (ctrl.bladeTiltRight ? 1 : 0) + (ctrl.bladeTiltLeft ? -1 : 0),
     bladeAngleInput: (ctrl.bladeAngleRight ? 1 : 0) + (ctrl.bladeAngleLeft ? -1 : 0),

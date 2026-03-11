@@ -23,7 +23,7 @@ import { EquipmentType, ExcavatorState, BulldozerState } from '@/lib/equipment/t
 import { createExcavatorState, updateExcavator, computeExcavatorFK } from '@/lib/equipment/excavator';
 import { createBulldozerState, updateBulldozer } from '@/lib/equipment/bulldozer';
 import { initControls, pollControls, getExcavatorInputs, getBulldozerInputs } from '@/lib/equipment/controls';
-import { excavatorDig, bulldozerPush } from '@/lib/equipment/terrainInteraction';
+import { excavatorDig, bulldozerPush, updateVehicleTerrainFollow } from '@/lib/equipment/terrainInteraction';
 import { craterImpact, explosiveImpact } from '@/lib/equipment/impacts';
 import { ExcavatorMesh, BulldozerMesh } from '@/components/EquipmentRenderer';
 
@@ -103,11 +103,13 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
         varying vec3 vViewPosition;
         varying float vRadius;
         varying vec3 vColor;
+        varying mat4 vProjMatrix;
         void main() {
             vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
             vViewPosition = mvPosition.xyz;
             vColor = instanceColor.rgb;
             vRadius = instanceRadius;
+            vProjMatrix = projectionMatrix;
             float screenRadius = instanceRadius * (800.0 / length(mvPosition.xyz));
             gl_PointSize = max(screenRadius, 1.0);
             gl_Position = projectionMatrix * mvPosition;
@@ -117,6 +119,7 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
         varying vec3 vViewPosition;
         varying float vRadius;
         varying vec3 vColor;
+        varying mat4 vProjMatrix;
         uniform float near;
         uniform float far;
         void main() {
@@ -127,7 +130,7 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
             float depth = vViewPosition.z + z * vRadius;
             float linearDepth = (-depth - near) / (far - near);
             gl_FragColor = vec4(linearDepth, vColor);
-            vec4 clipPos = projectionMatrix * vec4(vViewPosition.xy, depth, 1.0);
+            vec4 clipPos = vProjMatrix * vec4(vViewPosition.xy, depth, 1.0);
             float ndc = clipPos.z / clipPos.w;
             gl_FragDepth = (ndc + 1.0) * 0.5;
         }
@@ -423,6 +426,10 @@ function EquipmentController({
     if (ctrl.switchToFreeCamera) es.activeEquipment = 'none';
     
     const clampedDt = Math.min(dt, 0.033);
+    
+    // Always update both vehicles' terrain following
+    updateVehicleTerrainFollow(es.excavator.vehicle, field);
+    updateVehicleTerrainFollow(es.bulldozer.vehicle, field);
     
     if (es.activeEquipment === 'excavator') {
       const inputs = getExcavatorInputs(ctrl);
