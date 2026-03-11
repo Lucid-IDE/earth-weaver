@@ -103,11 +103,13 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
         varying vec3 vViewPosition;
         varying float vRadius;
         varying vec3 vColor;
+        varying mat4 vProjMatrix;
         void main() {
             vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
             vViewPosition = mvPosition.xyz;
             vColor = instanceColor.rgb;
             vRadius = instanceRadius;
+            vProjMatrix = projectionMatrix;
             float screenRadius = instanceRadius * (800.0 / length(mvPosition.xyz));
             gl_PointSize = max(screenRadius, 1.0);
             gl_Position = projectionMatrix * mvPosition;
@@ -117,6 +119,7 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
         varying vec3 vViewPosition;
         varying float vRadius;
         varying vec3 vColor;
+        varying mat4 vProjMatrix;
         uniform float near;
         uniform float far;
         void main() {
@@ -127,7 +130,7 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
             float depth = vViewPosition.z + z * vRadius;
             float linearDepth = (-depth - near) / (far - near);
             gl_FragColor = vec4(linearDepth, vColor);
-            vec4 clipPos = projectionMatrix * vec4(vViewPosition.xy, depth, 1.0);
+            vec4 clipPos = vProjMatrix * vec4(vViewPosition.xy, depth, 1.0);
             float ndc = clipPos.z / clipPos.w;
             gl_FragDepth = (ndc + 1.0) * 0.5;
         }
