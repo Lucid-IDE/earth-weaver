@@ -96,37 +96,32 @@ function ImpactBtn({ label, name, active }: { label: string; name: string; activ
 function ExcavatorHUD({ state }: { state: ExcavatorState }) {
   return (
     <div className="bg-card/85 backdrop-blur-sm border border-border rounded-md px-4 py-2 flex gap-6">
-      {/* Left Joystick */}
+      {/* Drive */}
       <div>
-        <div className="text-[10px] text-muted-foreground font-mono mb-1">LEFT STICK — TRACKS</div>
+        <div className="text-[10px] text-muted-foreground font-mono mb-1">DRIVE</div>
         <div className="grid grid-cols-3 gap-0.5 text-[9px] font-mono text-center w-[90px]">
           <div />
-          <Key k="W" label="L↑" active={state.vehicle.tracks.leftSpeed > 0} />
+          <Key k="↑" label="Fwd" />
           <div />
-          <div />
-          <Key k="S" label="L↓" active={state.vehicle.tracks.leftSpeed < 0} />
-          <div />
+          <Key k="←" label="Left" />
+          <Key k="↓" label="Back" />
+          <Key k="→" label="Right" />
         </div>
+        <div className="text-[8px] text-muted-foreground mt-1">W/S=L track · I/K=R track</div>
       </div>
       
-      {/* Right Joystick */}
+      {/* Arm */}
       <div>
-        <div className="text-[10px] text-muted-foreground font-mono mb-1">RIGHT STICK — ARM</div>
-        <div className="grid grid-cols-5 gap-0.5 text-[9px] font-mono text-center">
-          <div /> <Key k="I" label="R↑" /> <div /> <Key k="R" label="Boom↑" /> <div />
-          <Key k="J" label="Stk←" /> <div /> <Key k="L" label="Stk→" /> <Key k="F" label="Boom↓" /> <div />
-          <div /> <Key k="K" label="R↓" /> <div /> <div /> <div />
-        </div>
-      </div>
-      
-      {/* Extras */}
-      <div>
-        <div className="text-[10px] text-muted-foreground font-mono mb-1">EXTRAS</div>
-        <div className="flex gap-1">
-          <Key k="A" label="Swing←" />
-          <Key k="D" label="Swing→" />
+        <div className="text-[10px] text-muted-foreground font-mono mb-1">ARM</div>
+        <div className="flex gap-1 text-[9px] font-mono flex-wrap max-w-[140px]">
+          <Key k="R" label="Boom↑" />
+          <Key k="F" label="Boom↓" />
+          <Key k="J" label="Stk In" />
+          <Key k="L" label="Stk Out" />
           <Key k="Q" label="Curl" />
           <Key k="E" label="Dump" />
+          <Key k="A" label="Swing←" />
+          <Key k="D" label="Swing→" />
         </div>
       </div>
     </div>
