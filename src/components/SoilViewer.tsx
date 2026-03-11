@@ -23,7 +23,7 @@ import { EquipmentType, ExcavatorState, BulldozerState } from '@/lib/equipment/t
 import { createExcavatorState, updateExcavator, computeExcavatorFK } from '@/lib/equipment/excavator';
 import { createBulldozerState, updateBulldozer } from '@/lib/equipment/bulldozer';
 import { initControls, pollControls, getExcavatorInputs, getBulldozerInputs } from '@/lib/equipment/controls';
-import { excavatorDig, bulldozerPush } from '@/lib/equipment/terrainInteraction';
+import { excavatorDig, bulldozerPush, updateVehicleTerrainFollow } from '@/lib/equipment/terrainInteraction';
 import { craterImpact, explosiveImpact } from '@/lib/equipment/impacts';
 import { ExcavatorMesh, BulldozerMesh } from '@/components/EquipmentRenderer';
 
