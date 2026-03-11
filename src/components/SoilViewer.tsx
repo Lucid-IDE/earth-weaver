@@ -424,6 +424,10 @@ function EquipmentController({
     
     const clampedDt = Math.min(dt, 0.033);
     
+    // Always update both vehicles' terrain following
+    updateVehicleTerrainFollow(es.excavator.vehicle, field);
+    updateVehicleTerrainFollow(es.bulldozer.vehicle, field);
+    
     if (es.activeEquipment === 'excavator') {
       const inputs = getExcavatorInputs(ctrl);
       updateExcavator(es.excavator, clampedDt, inputs);
