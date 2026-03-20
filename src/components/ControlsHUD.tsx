@@ -46,6 +46,7 @@ export default function ControlsHUD({ activeEquipment, excavator, bulldozer, imp
           {activeEquipment === 'excavator' && (
             <div className="space-y-0.5 text-[10px] font-mono">
               <Gauge label="Hydraulic" value={excavator.hydraulicPressure} color="text-accent" />
+              <Gauge label="Bucket Fill" value={excavator.bucketFill} color="text-primary" />
               <Gauge label="Boom" value={(excavator.boom.angle - excavator.boom.minAngle) / (excavator.boom.maxAngle - excavator.boom.minAngle)} />
               <Gauge label="Stick" value={(excavator.stick.angle - excavator.stick.minAngle) / (excavator.stick.maxAngle - excavator.stick.minAngle)} />
               <Gauge label="Bucket" value={(excavator.bucket.angle - excavator.bucket.minAngle) / (excavator.bucket.maxAngle - excavator.bucket.minAngle)} />
