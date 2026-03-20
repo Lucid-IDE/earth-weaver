@@ -9,6 +9,8 @@ export function createBulldozerState(): BulldozerState {
       posX: -0.3, posY: 0, posZ: 0.3,
       heading: Math.PI / 4,
       pitch: 0,
+      contactSink: 0,
+      groundClearance: 0,
       tracks: { leftSpeed: 0, rightSpeed: 0 },
       speed: 0,
       turnRate: 0,

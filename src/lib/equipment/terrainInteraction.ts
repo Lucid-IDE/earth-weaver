@@ -4,10 +4,14 @@
 
 import { VoxelField } from '../soil/VoxelField';
 import { SoilSimulator } from '../soil/soilSim';
-import { VOXEL_SIZE, SURFACE_IY } from '../soil/constants';
+import { VOXEL_SIZE, SURFACE_IY, PHI_SCALE, DEG } from '../soil/constants';
+import { getMaterialAt } from '../soil/materialBrain';
 import { ExcavatorState, BulldozerState, VehicleState } from './types';
 import { computeExcavatorFK } from './excavator';
 import { computeBladeGeometry } from './bulldozer';
+import { worldToMPM } from '../mpm/bridge';
+import { addParticle, MaterialType } from '../mpm/mpmSolver';
+import { MAX_PARTICLES } from '../mpm/constants';
 
 // ── World→Grid coordinate conversion ────────────────────────────────
 function worldToGridX(wx: number, nx: number): number {
@@ -20,63 +24,307 @@ function worldToGridZ(wz: number, nz: number): number {
   return wz / VOXEL_SIZE + nz / 2;
 }
 
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function gridToWorldY(iy: number): number {
+  return (iy - SURFACE_IY) * VOXEL_SIZE;
+}
+
+function safePhi(field: VoxelField, ix: number, iy: number, iz: number): number {
+  if (ix < 0 || ix > field.nx || iy < 0 || iy > field.ny || iz < 0 || iz > field.nz) {
+    return 32767;
+  }
+  return field.phi[field.vidx(ix, iy, iz)];
+}
+
+function getColumnSurfaceY(field: VoxelField, ix: number, iz: number): number {
+  const cx = Math.max(0, Math.min(field.nx, ix));
+  const cz = Math.max(0, Math.min(field.nz, iz));
+
+  for (let iy = field.ny; iy > 0; iy--) {
+    const phiTop = safePhi(field, cx, iy, cz);
+    const phiBottom = safePhi(field, cx, iy - 1, cz);
+    if (phiTop >= 0 && phiBottom < 0) {
+      const t = phiTop / Math.max(1, (phiTop - phiBottom));
+      return lerp(gridToWorldY(iy), gridToWorldY(iy - 1), t);
+    }
+  }
+
+  if (safePhi(field, cx, 0, cz) < 0) return gridToWorldY(0);
+  return -SURFACE_IY * VOXEL_SIZE;
+}
+
 // ── Terrain Height Query ────────────────────────────────────────────
 // Find the surface Y at a given world XZ by scanning the SDF column
 export function getTerrainHeight(field: VoxelField, wx: number, wz: number): number {
   const gx = worldToGridX(wx, field.nx);
   const gz = worldToGridZ(wz, field.nz);
-  
-  const ix = Math.round(gx);
-  const iz = Math.round(gz);
-  
-  if (ix < 0 || ix > field.nx || iz < 0 || iz > field.nz) return 0;
-  
-  // Scan from top down to find first voxel where phi < 0 (inside terrain)
-  for (let iy = field.ny; iy >= 0; iy--) {
-    const phi = field.phi[field.vidx(
-      Math.max(0, Math.min(field.nx, ix)),
-      iy,
-      Math.max(0, Math.min(field.nz, iz))
-    )];
-    if (phi < 0) {
-      // Found surface — interpolate for smoother result
-      const surfaceY = (iy - SURFACE_IY) * VOXEL_SIZE;
-      return surfaceY;
+
+  const ix0 = Math.floor(gx);
+  const iz0 = Math.floor(gz);
+  const ix1 = ix0 + 1;
+  const iz1 = iz0 + 1;
+
+  const tx = gx - ix0;
+  const tz = gz - iz0;
+
+  const h00 = getColumnSurfaceY(field, ix0, iz0);
+  const h10 = getColumnSurfaceY(field, ix1, iz0);
+  const h01 = getColumnSurfaceY(field, ix0, iz1);
+  const h11 = getColumnSurfaceY(field, ix1, iz1);
+
+  const hx0 = lerp(h00, h10, tx);
+  const hx1 = lerp(h01, h11, tx);
+  return lerp(hx0, hx1, tz);
+}
+
+function computeSinkDepth(wx: number, surfaceY: number, wz: number, loadFactor: number): number {
+  const mat = getMaterialAt(wx, surfaceY - 0.01, wz);
+  const frictionNorm = clamp01((mat.frictionAngle / DEG - 15) / 25);
+  const softness = clamp01(
+    mat.moisture * 0.55 +
+    (1 - frictionNorm) * 0.25 +
+    (1 - clamp01(mat.cohesion)) * 0.2,
+  );
+  return 0.0015 + softness * 0.011 * loadFactor;
+}
+
+function applyCompactionBrush(
+  field: VoxelField,
+  cx: number,
+  cy: number,
+  cz: number,
+  radius: number,
+  depth: number,
+  disturbanceAge: number,
+) {
+  const gx = worldToGridX(cx, field.nx);
+  const gy = worldToGridY(cy);
+  const gz = worldToGridZ(cz, field.nz);
+
+  const rGrid = radius / VOXEL_SIZE;
+  const margin = Math.ceil(rGrid) + 1;
+
+  const ixMin = Math.max(0, Math.floor(gx - margin));
+  const ixMax = Math.min(field.nx, Math.ceil(gx + margin));
+  const iyMin = Math.max(0, Math.floor(gy - margin));
+  const iyMax = Math.min(field.ny, Math.ceil(gy + margin));
+  const izMin = Math.max(0, Math.floor(gz - margin));
+  const izMax = Math.min(field.nz, Math.ceil(gz + margin));
+
+  const scaledDepth = Math.max(0.0005, depth);
+
+  for (let iz = izMin; iz <= izMax; iz++) {
+    for (let iy = iyMin; iy <= iyMax; iy++) {
+      for (let ix = ixMin; ix <= ixMax; ix++) {
+        const dx = (ix - gx) * VOXEL_SIZE;
+        const dy = (iy - gy) * VOXEL_SIZE * 1.6;
+        const dz = (iz - gz) * VOXEL_SIZE;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist > radius) continue;
+
+        const falloff = 1 - dist / radius;
+        const phiDelta = Math.round((falloff * scaledDepth / PHI_SCALE) * 32767);
+        if (phiDelta <= 0) continue;
+
+        const idx = field.vidx(ix, iy, iz);
+        const oldPhi = field.phi[idx];
+        const nextPhi = Math.min(32767, oldPhi + phiDelta) as number;
+        if (nextPhi === oldPhi) continue;
+
+        field.phi[idx] = nextPhi;
+        if (oldPhi < 0) {
+          field.disturbanceAge[idx] = Math.min(field.disturbanceAge[idx], disturbanceAge);
+        }
+      }
     }
   }
-  
-  // No terrain found, return bottom
-  return -SURFACE_IY * VOXEL_SIZE;
+}
+
+function addSoilBrush(
+  field: VoxelField,
+  cx: number,
+  cy: number,
+  cz: number,
+  radius: number,
+  strength: number,
+  disturbanceAge: number,
+) {
+  const gx = worldToGridX(cx, field.nx);
+  const gy = worldToGridY(cy);
+  const gz = worldToGridZ(cz, field.nz);
+
+  const rGrid = radius / VOXEL_SIZE;
+  const margin = Math.ceil(rGrid) + 1;
+
+  const ixMin = Math.max(0, Math.floor(gx - margin));
+  const ixMax = Math.min(field.nx, Math.ceil(gx + margin));
+  const iyMin = Math.max(0, Math.floor(gy - margin));
+  const iyMax = Math.min(field.ny, Math.ceil(gy + margin));
+  const izMin = Math.max(0, Math.floor(gz - margin));
+  const izMax = Math.min(field.nz, Math.ceil(gz + margin));
+
+  for (let iz = izMin; iz <= izMax; iz++) {
+    for (let iy = iyMin; iy <= iyMax; iy++) {
+      for (let ix = ixMin; ix <= ixMax; ix++) {
+        const dx = (ix - gx) * VOXEL_SIZE;
+        const dy = (iy - gy) * VOXEL_SIZE;
+        const dz = (iz - gz) * VOXEL_SIZE;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist > radius) continue;
+
+        const falloff = 1 - dist / radius;
+        const phiDelta = Math.round(falloff * strength);
+        if (phiDelta <= 0) continue;
+
+        const idx = field.vidx(ix, iy, iz);
+        const oldPhi = field.phi[idx];
+        const nextPhi = Math.max(-32767, oldPhi - phiDelta) as number;
+        if (nextPhi === oldPhi) continue;
+
+        field.phi[idx] = nextPhi;
+        field.disturbanceAge[idx] = Math.min(field.disturbanceAge[idx], disturbanceAge);
+      }
+    }
+  }
+}
+
+function classifyMaterial(friction: number, cohesion: number): number {
+  if (cohesion > 0.6) return MaterialType.Clay;
+  if (cohesion > 0.35) return MaterialType.Loam;
+  if (cohesion > 0.2) return MaterialType.Organic;
+  if (friction > 30 * DEG) return MaterialType.Sand;
+  if (friction > 27 * DEG) return MaterialType.Gravel;
+  return MaterialType.Silt;
+}
+
+interface TerrainFollowConfig {
+  trackWidth: number;
+  trackLength: number;
+  rideHeight: number;
+  loadFactor: number;
+  followSharpness: number;
+  maxDropSpeed: number;
+  allowTrackMarks: boolean;
+}
+
+const DEFAULT_FOLLOW_CONFIG: TerrainFollowConfig = {
+  trackWidth: 0.09,
+  trackLength: 0.16,
+  rideHeight: 0.016,
+  loadFactor: 1,
+  followSharpness: 0.3,
+  maxDropSpeed: 0.45,
+  allowTrackMarks: true,
+};
+
+function stampTrackMarks(
+  field: VoxelField,
+  vehicle: VehicleState,
+  cfg: TerrainFollowConfig,
+  driveIntensity: number,
+) {
+  const ch = Math.cos(vehicle.heading);
+  const sh = Math.sin(vehicle.heading);
+
+  const fwdX = sh;
+  const fwdZ = ch;
+  const rightX = ch;
+  const rightZ = -sh;
+
+  const halfTrackWidth = cfg.trackWidth * 0.5;
+  const segments = 5;
+  const sinkBoost = vehicle.contactSink * 0.8;
+  const depthBase = 0.0012 + driveIntensity * 0.003 + sinkBoost;
+
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < segments; i++) {
+      const t = (i / (segments - 1) - 0.5) * cfg.trackLength * 0.95;
+      const px = vehicle.posX + fwdX * t + rightX * halfTrackWidth * side;
+      const pz = vehicle.posZ + fwdZ * t + rightZ * halfTrackWidth * side;
+      const terrainY = getTerrainHeight(field, px, pz);
+      const trackBottom = vehicle.posY - cfg.rideHeight;
+      const penetration = terrainY - trackBottom;
+
+      if (penetration < -0.004) continue;
+
+      const imprintDepth = Math.max(0.001, Math.min(0.008, depthBase + Math.max(0, penetration) * 0.5));
+      const imprintRadius = 0.010 + driveIntensity * 0.003;
+      applyCompactionBrush(
+        field,
+        px,
+        terrainY - imprintDepth * 0.5,
+        pz,
+        imprintRadius,
+        imprintDepth,
+        16,
+      );
+    }
+  }
 }
 
 // ── Update vehicle Y to follow terrain ──────────────────────────────
-export function updateVehicleTerrainFollow(vehicle: VehicleState, field: VoxelField) {
-  // Sample at multiple points under the vehicle for stability
+export function updateVehicleTerrainFollow(
+  vehicle: VehicleState,
+  field: VoxelField,
+  dt: number = 1 / 60,
+  config: Partial<TerrainFollowConfig> = {},
+) {
+  const cfg = { ...DEFAULT_FOLLOW_CONFIG, ...config };
   const ch = Math.cos(vehicle.heading);
   const sh = Math.sin(vehicle.heading);
-  const halfLen = 0.06; // half track length
-  
-  // Sample at front, back, and center
-  const centerY = getTerrainHeight(field, vehicle.posX, vehicle.posZ);
-  const frontY = getTerrainHeight(field, 
-    vehicle.posX + sh * halfLen, 
-    vehicle.posZ + ch * halfLen
-  );
-  const backY = getTerrainHeight(field, 
-    vehicle.posX - sh * halfLen, 
-    vehicle.posZ - ch * halfLen
-  );
-  
-  // Average for center height, use front/back for pitch
-  const avgY = (centerY + frontY + backY) / 3;
-  
-  // Smooth follow — don't snap instantly
-  const targetY = avgY + 0.015; // offset so tracks sit ON surface, not inside it
-  vehicle.posY += (targetY - vehicle.posY) * 0.3;
-  
-  // Calculate pitch from front/back difference
-  const pitchAngle = Math.atan2(backY - frontY, halfLen * 2);
-  vehicle.pitch += (pitchAngle - vehicle.pitch) * 0.2;
+
+  const fwdX = sh;
+  const fwdZ = ch;
+  const rightX = ch;
+  const rightZ = -sh;
+
+  const halfLen = cfg.trackLength * 0.5;
+  const halfWidth = cfg.trackWidth * 0.5;
+
+  const contacts = [
+    { x: vehicle.posX + fwdX * halfLen + rightX * halfWidth, z: vehicle.posZ + fwdZ * halfLen + rightZ * halfWidth },
+    { x: vehicle.posX + fwdX * halfLen - rightX * halfWidth, z: vehicle.posZ + fwdZ * halfLen - rightZ * halfWidth },
+    { x: vehicle.posX - fwdX * halfLen + rightX * halfWidth, z: vehicle.posZ - fwdZ * halfLen + rightZ * halfWidth },
+    { x: vehicle.posX - fwdX * halfLen - rightX * halfWidth, z: vehicle.posZ - fwdZ * halfLen - rightZ * halfWidth },
+    { x: vehicle.posX + rightX * halfWidth, z: vehicle.posZ + rightZ * halfWidth },
+    { x: vehicle.posX - rightX * halfWidth, z: vehicle.posZ - rightZ * halfWidth },
+  ];
+
+  const surfaceYs = contacts.map((c) => getTerrainHeight(field, c.x, c.z));
+  const sinkYs = contacts.map((c, i) => computeSinkDepth(c.x, surfaceYs[i], c.z, cfg.loadFactor));
+  const contactYs = surfaceYs.map((y, i) => y - sinkYs[i]);
+
+  const frontAvg = (contactYs[0] + contactYs[1]) * 0.5;
+  const backAvg = (contactYs[2] + contactYs[3]) * 0.5;
+  const allAvg = contactYs.reduce((a, b) => a + b, 0) / contactYs.length;
+  const targetY = allAvg + cfg.rideHeight;
+
+  if (targetY > vehicle.posY) {
+    vehicle.posY += (targetY - vehicle.posY) * Math.min(1, cfg.followSharpness * 1.8);
+  } else {
+    const maxDrop = cfg.maxDropSpeed * dt;
+    vehicle.posY += Math.max(targetY - vehicle.posY, -maxDrop);
+  }
+
+  const targetPitch = Math.atan2(frontAvg - backAvg, cfg.trackLength);
+  vehicle.pitch += (targetPitch - vehicle.pitch) * Math.min(1, cfg.followSharpness);
+
+  const avgSurface = surfaceYs.reduce((a, b) => a + b, 0) / surfaceYs.length;
+  const avgSink = sinkYs.reduce((a, b) => a + b, 0) / sinkYs.length;
+  vehicle.contactSink = avgSink;
+  vehicle.groundClearance = Math.max(0, vehicle.posY - avgSurface);
+
+  const driveIntensity = clamp01((Math.abs(vehicle.tracks.leftSpeed) + Math.abs(vehicle.tracks.rightSpeed)) * 0.5);
+  if (cfg.allowTrackMarks && driveIntensity > 0.08) {
+    stampTrackMarks(field, vehicle, cfg, driveIntensity);
+  }
 }
 
 // ── SDF sampling helper ─────────────────────────────────────────────
@@ -84,16 +332,38 @@ function sampleSDF(field: VoxelField, wx: number, wy: number, wz: number): numbe
   const gx = worldToGridX(wx, field.nx);
   const gy = worldToGridY(wy);
   const gz = worldToGridZ(wz, field.nz);
-  
-  const ix = Math.round(gx);
-  const iy = Math.round(gy);
-  const iz = Math.round(gz);
-  
-  if (ix < 0 || ix > field.nx || iy < 0 || iy > field.ny || iz < 0 || iz > field.nz) {
+
+  const ix0 = Math.floor(gx);
+  const iy0 = Math.floor(gy);
+  const iz0 = Math.floor(gz);
+  const tx = gx - ix0;
+  const ty = gy - iy0;
+  const tz = gz - iz0;
+
+  const ix1 = ix0 + 1;
+  const iy1 = iy0 + 1;
+  const iz1 = iz0 + 1;
+
+  if (ix0 < 0 || iy0 < 0 || iz0 < 0 || ix1 > field.nx || iy1 > field.ny || iz1 > field.nz) {
     return 32767; // outside bounds = air
   }
-  
-  return field.phi[field.vidx(ix, iy, iz)];
+
+  const p000 = safePhi(field, ix0, iy0, iz0);
+  const p100 = safePhi(field, ix1, iy0, iz0);
+  const p010 = safePhi(field, ix0, iy1, iz0);
+  const p110 = safePhi(field, ix1, iy1, iz0);
+  const p001 = safePhi(field, ix0, iy0, iz1);
+  const p101 = safePhi(field, ix1, iy0, iz1);
+  const p011 = safePhi(field, ix0, iy1, iz1);
+  const p111 = safePhi(field, ix1, iy1, iz1);
+
+  const c00 = lerp(p000, p100, tx);
+  const c10 = lerp(p010, p110, tx);
+  const c01 = lerp(p001, p101, tx);
+  const c11 = lerp(p011, p111, tx);
+  const c0 = lerp(c00, c10, ty);
+  const c1 = lerp(c01, c11, ty);
+  return lerp(c0, c1, tz);
 }
 
 // ── Excavator bucket dig ────────────────────────────────────────────
@@ -101,32 +371,149 @@ export function excavatorDig(
   state: ExcavatorState,
   field: VoxelField,
   sim: SoilSimulator,
-  digRadius: number = 0.03,
+  options: {
+    digRadius?: number;
+    bucketInput?: number;
+    dt?: number;
+  } = {},
 ): boolean {
+  const digRadius = options.digRadius ?? 0.03;
+  const bucketInput = options.bucketInput ?? 0;
+  const dt = options.dt ?? 1 / 60;
   const fk = computeExcavatorFK(state);
-  let didDig = false;
-  
+  let didChange = false;
+  let cutMetric = 0;
+
   for (const tooth of fk.bucketTeeth) {
+    const terrainY = getTerrainHeight(field, tooth[0], tooth[2]);
+    const penetration = terrainY - tooth[1];
     const phi = sampleSDF(field, tooth[0], tooth[1], tooth[2]);
-    if (phi < 0) {
-      // Tooth is inside terrain — dig!
-      field.applyStamp(tooth[0], tooth[1], tooth[2], digRadius);
-      didDig = true;
+    if (phi < 0 || penetration > 0.002) {
+      const localRadius = digRadius * (1 + Math.min(0.8, Math.max(0, penetration) * 18));
+      field.applyStamp(tooth[0], tooth[1] - 0.002, tooth[2], localRadius);
+      cutMetric += Math.max(0.002, penetration + 0.004);
+      didChange = true;
     }
   }
-  
+
   // Also check bucket tip
+  const tipTerrain = getTerrainHeight(field, fk.bucketTip[0], fk.bucketTip[2]);
+  const tipPenetration = tipTerrain - fk.bucketTip[1];
   const tipPhi = sampleSDF(field, fk.bucketTip[0], fk.bucketTip[1], fk.bucketTip[2]);
-  if (tipPhi < 0) {
-    field.applyStamp(fk.bucketTip[0], fk.bucketTip[1], fk.bucketTip[2], digRadius * 1.2);
-    didDig = true;
+  if (tipPhi < 0 || tipPenetration > 0.0015) {
+    field.applyStamp(
+      fk.bucketTip[0],
+      fk.bucketTip[1] - 0.003,
+      fk.bucketTip[2],
+      digRadius * 1.15,
+    );
+    cutMetric += Math.max(0.003, tipPenetration + 0.005);
+    didChange = true;
   }
-  
-  if (didDig) {
+
+  if (cutMetric > 0) {
+    const material = getMaterialAt(fk.bucketTip[0], fk.bucketTip[1] - 0.01, fk.bucketTip[2]);
+    const fillGain = Math.min(0.16, cutMetric * (2.2 + material.moisture * 1.2 + material.cohesion * 0.6));
+    if (bucketInput > -0.2) {
+      state.bucketFill = clamp01(state.bucketFill + fillGain);
+    }
+  }
+
+  const canDump = state.bucketFill > 0.01 && bucketInput < -0.15 && fk.bucketTip[1] > tipTerrain - 0.015;
+  if (canDump) {
+    const dumpAmount = Math.min(state.bucketFill, (0.02 + (-bucketInput) * 0.04) * Math.max(1, dt * 60));
+    dumpBucketMaterial(state, field, sim, fk, dumpAmount);
+    state.bucketFill = Math.max(0, state.bucketFill - dumpAmount);
+    didChange = true;
+  }
+
+  if (didChange) {
     sim.activate();
   }
-  
-  return didDig;
+
+  return didChange;
+}
+
+function dumpBucketMaterial(
+  state: ExcavatorState,
+  field: VoxelField,
+  sim: SoilSimulator,
+  fk: ReturnType<typeof computeExcavatorFK>,
+  amount: number,
+) {
+  const dirX = fk.bucketTip[0] - fk.stickEnd[0];
+  const dirY = fk.bucketTip[1] - fk.stickEnd[1];
+  const dirZ = fk.bucketTip[2] - fk.stickEnd[2];
+  const len = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ) || 1;
+
+  const ndx = dirX / len;
+  const ndy = dirY / len;
+  const ndz = dirZ / len;
+
+  const sideX = ndz;
+  const sideZ = -ndx;
+  const drops = Math.max(2, Math.min(8, Math.ceil(amount * 10)));
+
+  for (let i = 0; i < drops; i++) {
+    const spread = (i / Math.max(1, drops - 1) - 0.5) * 0.028;
+    const px = fk.bucketTip[0] + ndx * 0.016 + sideX * spread;
+    const pz = fk.bucketTip[2] + ndz * 0.016 + sideZ * spread;
+    const terrainY = getTerrainHeight(field, px, pz);
+    const py = Math.min(fk.bucketTip[1] - 0.008, terrainY + 0.035);
+
+    addSoilBrush(
+      field,
+      px,
+      py,
+      pz,
+      0.010 + amount * 0.012,
+      3800 + amount * 8200,
+      12,
+    );
+
+    const mat = getMaterialAt(px, py - 0.01, pz);
+    const matType = classifyMaterial(mat.frictionAngle, mat.cohesion);
+    const particleCount = Math.max(1, Math.floor(2 + amount * 6));
+
+    for (let k = 0; k < particleCount; k++) {
+      if (sim.mpm.numParticles >= MAX_PARTICLES - 1) return;
+
+      const jx = (Math.random() - 0.5) * 0.015;
+      const jy = Math.random() * 0.01;
+      const jz = (Math.random() - 0.5) * 0.015;
+      const [mx, my, mz] = worldToMPM(px + jx, py + jy, pz + jz);
+
+      if (mx < 0.05 || mx > 0.95 || my < 0.05 || my > 0.95 || mz < 0.05 || mz > 0.95) continue;
+
+      const pidx = addParticle(
+        sim.mpm,
+        mx,
+        my,
+        mz,
+        matType,
+        mat.frictionAngle,
+        mat.cohesion,
+        mat.specificWeight,
+        mat.youngModulus,
+        mat.poissonRatio,
+        mat.damping,
+        mat.moisture,
+        3,
+      );
+
+      if (pidx >= 0) {
+        const spill = Math.max(0.02, 0.08 * amount);
+        sim.mpm.vx[pidx] = ndx * spill + (Math.random() - 0.5) * 0.03;
+        sim.mpm.vy[pidx] = -0.02 - Math.random() * 0.03 + ndy * 0.01;
+        sim.mpm.vz[pidx] = ndz * spill + (Math.random() - 0.5) * 0.03;
+      }
+    }
+  }
+
+  // Slight passive spillage when carrying heavy load with open bucket
+  if (state.bucketFill > 0.65 && state.bucket.angle < -95 * DEG) {
+    state.bucketFill = Math.max(0, state.bucketFill - 0.003);
+  }
 }
 
 // ── Bulldozer blade push ────────────────────────────────────────────
@@ -135,47 +522,44 @@ export function bulldozerPush(
   field: VoxelField,
   sim: SoilSimulator,
 ): boolean {
-  // Only push when blade is at or below surface level  
-  if (state.bladeHeight > 0.02) return false;
-  
+  const driveIntensity = clamp01((Math.abs(state.vehicle.tracks.leftSpeed) + Math.abs(state.vehicle.tracks.rightSpeed)) * 0.5);
+  if (driveIntensity < 0.08) return false;
+
   const blade = computeBladeGeometry(state);
   let didPush = false;
-  
-  const pushRadius = 0.018;
-  
+
   for (const point of blade.samplePoints) {
+    const terrainY = getTerrainHeight(field, point[0], point[2]);
+    const penetration = terrainY - point[1];
     const phi = sampleSDF(field, point[0], point[1], point[2]);
-    if (phi < 0) {
-      // Blade intersects terrain — carve and push
-      field.applyStamp(point[0], point[1], point[2], pushRadius);
-      
-      // Deposit material in front of blade (push effect)
-      const pushDist = 0.035;
+
+    if (penetration > 0.001 || phi < 0) {
+      const cutRadius = 0.013 + Math.min(0.012, Math.max(0, penetration) * 0.5);
+      field.applyStamp(point[0], point[1] - 0.002, point[2], cutRadius);
+
+      // Deposit material in front of blade (berm buildup)
+      const pushDist = 0.026 + driveIntensity * 0.02 + Math.max(0, penetration) * 0.4;
       const depositX = point[0] + blade.bladeNormal[0] * pushDist;
-      const depositY = point[1];
+      const depositY = terrainY + 0.006;
       const depositZ = point[2] + blade.bladeNormal[2] * pushDist;
-      
-      const dgx = worldToGridX(depositX, field.nx);
-      const dgy = worldToGridY(depositY);
-      const dgz = worldToGridZ(depositZ, field.nz);
-      
-      const dix = Math.round(dgx);
-      const diy = Math.round(dgy);
-      const diz = Math.round(dgz);
-      
-      if (dix >= 0 && dix <= field.nx && diy >= 0 && diy <= field.ny && diz >= 0 && diz <= field.nz) {
-        const didx = field.vidx(dix, diy, diz);
-        field.phi[didx] = Math.max(-32767, field.phi[didx] - 5000) as number;
-        field.disturbanceAge[didx] = 0;
-      }
-      
+
+      addSoilBrush(
+        field,
+        depositX,
+        depositY,
+        depositZ,
+        0.010 + driveIntensity * 0.006,
+        3200 + driveIntensity * 4200,
+        22,
+      );
+
       didPush = true;
     }
   }
-  
+
   if (didPush) {
     sim.activate();
   }
-  
+
   return didPush;
 }

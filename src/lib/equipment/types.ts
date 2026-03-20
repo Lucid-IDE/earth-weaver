@@ -20,6 +20,8 @@ export interface VehicleState {
   posZ: number;
   heading: number;     // yaw in radians
   pitch: number;       // for slope following
+  contactSink: number; // dynamic sink depth based on soil softness
+  groundClearance: number; // estimated chassis-to-surface clearance
   tracks: TrackState;
   speed: number;       // derived forward speed
   turnRate: number;    // derived turn rate
@@ -31,6 +33,7 @@ export interface ExcavatorState {
   boom: JointState;       // main arm
   stick: JointState;      // secondary arm
   bucket: JointState;     // bucket curl
+  bucketFill: number;     // 0-1 captured soil load for scoop/drop behavior
   hydraulicPressure: number; // 0-1 visual feedback
 }
 
