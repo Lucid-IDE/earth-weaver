@@ -427,32 +427,87 @@ function EquipmentController({
     
     const clampedDt = Math.min(dt, 0.033);
     
-    // Always update both vehicles' terrain following
-    updateVehicleTerrainFollow(es.excavator.vehicle, field);
-    updateVehicleTerrainFollow(es.bulldozer.vehicle, field);
+    let terrainChanged = false;
     
     if (es.activeEquipment === 'excavator') {
       const inputs = getExcavatorInputs(ctrl);
       updateExcavator(es.excavator, clampedDt, inputs);
+      updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
+        trackWidth: 0.09,
+        trackLength: 0.17,
+        rideHeight: 0.018,
+        loadFactor: 0.95,
+        followSharpness: 0.36,
+        maxDropSpeed: 0.45,
+      });
+      // Keep inactive dozer pinned to terrain but don't stamp marks
+      updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
+        trackWidth: 0.11,
+        trackLength: 0.19,
+        rideHeight: 0.021,
+        loadFactor: 1.2,
+        allowTrackMarks: false,
+      });
       
-      // Continuous digging when bucket is moving and in terrain
-      const armActive = Math.abs(inputs.boomInput) + Math.abs(inputs.stickInput) + Math.abs(inputs.bucketInput) > 0;
-      if (armActive) {
-        const didDig = excavatorDig(es.excavator, field, sim);
-        if (didDig) rebuildMesh();
+      // Dig/scoop/drop when the arm is actively used or carrying material
+      const armActive = Math.abs(inputs.boomInput) + Math.abs(inputs.stickInput) + Math.abs(inputs.bucketInput) > 0.01;
+      if (armActive || es.excavator.bucketFill > 0.01) {
+        const didDig = excavatorDig(es.excavator, field, sim, {
+          bucketInput: inputs.bucketInput,
+          dt: clampedDt,
+        });
+        if (didDig) terrainChanged = true;
       }
     }
     
     if (es.activeEquipment === 'bulldozer') {
       const inputs = getBulldozerInputs(ctrl);
       updateBulldozer(es.bulldozer, clampedDt, inputs);
+      updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
+        trackWidth: 0.11,
+        trackLength: 0.19,
+        rideHeight: 0.021,
+        loadFactor: 1.2,
+        followSharpness: 0.32,
+        maxDropSpeed: 0.4,
+      });
+      // Keep inactive excavator pinned to terrain but don't stamp marks
+      updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
+        trackWidth: 0.09,
+        trackLength: 0.17,
+        rideHeight: 0.018,
+        loadFactor: 0.95,
+        allowTrackMarks: false,
+      });
       
       // Continuous pushing when moving with blade down
       const isMoving = Math.abs(inputs.leftTrack) + Math.abs(inputs.rightTrack) > 0;
-      if (isMoving) {
+      const bladeEngaged = es.bulldozer.bladeHeight < 0.03;
+      if (isMoving && bladeEngaged) {
         const didPush = bulldozerPush(es.bulldozer, field, sim);
-        if (didPush) rebuildMesh();
+        if (didPush) terrainChanged = true;
       }
+    }
+
+    if (es.activeEquipment === 'none') {
+      updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
+        trackWidth: 0.09,
+        trackLength: 0.17,
+        rideHeight: 0.018,
+        loadFactor: 0.95,
+        allowTrackMarks: false,
+      });
+      updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
+        trackWidth: 0.11,
+        trackLength: 0.19,
+        rideHeight: 0.021,
+        loadFactor: 1.2,
+        allowTrackMarks: false,
+      });
+    }
+
+    if (terrainChanged) {
+      rebuildMesh();
     }
     
     // Impact triggers
