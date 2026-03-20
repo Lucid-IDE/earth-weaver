@@ -270,7 +270,6 @@ function stampTrackMarks(
 }
 
 // ── Update vehicle Y to follow terrain ──────────────────────────────
-export function updateVehicleTerrainFollow(vehicle: VehicleState, field: VoxelField) {
 export function updateVehicleTerrainFollow(
   vehicle: VehicleState,
   field: VoxelField,
