@@ -207,6 +207,8 @@ function classifyMaterial(friction: number, cohesion: number): number {
 interface TerrainFollowConfig {
   trackWidth: number;
   trackLength: number;
+  /** Height of vehicle origin above track pad bottom.
+   *  Must match renderer: trackHeight * 0.88 so pads sit ON the surface. */
   rideHeight: number;
   loadFactor: number;
   followSharpness: number;
@@ -217,10 +219,10 @@ interface TerrainFollowConfig {
 const DEFAULT_FOLLOW_CONFIG: TerrainFollowConfig = {
   trackWidth: 0.09,
   trackLength: 0.16,
-  rideHeight: 0.016,
+  rideHeight: 0.025,  // th * 0.88
   loadFactor: 1,
-  followSharpness: 0.3,
-  maxDropSpeed: 0.45,
+  followSharpness: 0.55,
+  maxDropSpeed: 0.6,
   allowTrackMarks: true,
 };
 
