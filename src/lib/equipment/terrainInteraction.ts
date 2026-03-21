@@ -87,12 +87,17 @@ export function getTerrainHeight(field: VoxelField, wx: number, wz: number): num
 function computeSinkDepth(wx: number, surfaceY: number, wz: number, loadFactor: number): number {
   const mat = getMaterialAt(wx, surfaceY - 0.01, wz);
   const frictionNorm = clamp01((mat.frictionAngle / DEG - 15) / 25);
+  // Softness: wet clay sinks most, dry gravel almost none
+  const moistureFactor = mat.moisture * mat.moisture; // quadratic: only very wet soil sinks much
+  const cohesionFactor = clamp01(1 - mat.cohesion * 0.8); // low cohesion = more sink
+  const frictionFactor = clamp01(1 - frictionNorm); // low friction = more sink
   const softness = clamp01(
-    mat.moisture * 0.55 +
-    (1 - frictionNorm) * 0.25 +
-    (1 - clamp01(mat.cohesion)) * 0.2,
+    moistureFactor * 0.5 +
+    frictionFactor * 0.25 +
+    cohesionFactor * 0.25,
   );
-  return 0.0015 + softness * 0.011 * loadFactor;
+  // Base sink: 0.5mm minimum, up to ~5mm on very soft wet soil
+  return 0.0005 + softness * 0.005 * loadFactor;
 }
 
 function applyCompactionBrush(
