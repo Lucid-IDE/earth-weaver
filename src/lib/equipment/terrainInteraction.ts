@@ -87,12 +87,17 @@ export function getTerrainHeight(field: VoxelField, wx: number, wz: number): num
 function computeSinkDepth(wx: number, surfaceY: number, wz: number, loadFactor: number): number {
   const mat = getMaterialAt(wx, surfaceY - 0.01, wz);
   const frictionNorm = clamp01((mat.frictionAngle / DEG - 15) / 25);
+  // Softness: wet clay sinks most, dry gravel almost none
+  const moistureFactor = mat.moisture * mat.moisture; // quadratic: only very wet soil sinks much
+  const cohesionFactor = clamp01(1 - mat.cohesion * 0.8); // low cohesion = more sink
+  const frictionFactor = clamp01(1 - frictionNorm); // low friction = more sink
   const softness = clamp01(
-    mat.moisture * 0.55 +
-    (1 - frictionNorm) * 0.25 +
-    (1 - clamp01(mat.cohesion)) * 0.2,
+    moistureFactor * 0.5 +
+    frictionFactor * 0.25 +
+    cohesionFactor * 0.25,
   );
-  return 0.0015 + softness * 0.011 * loadFactor;
+  // Base sink: 0.5mm minimum, up to ~5mm on very soft wet soil
+  return 0.0005 + softness * 0.005 * loadFactor;
 }
 
 function applyCompactionBrush(
@@ -207,6 +212,8 @@ function classifyMaterial(friction: number, cohesion: number): number {
 interface TerrainFollowConfig {
   trackWidth: number;
   trackLength: number;
+  /** Height of vehicle origin above track pad bottom.
+   *  Must match renderer: trackHeight * 0.88 so pads sit ON the surface. */
   rideHeight: number;
   loadFactor: number;
   followSharpness: number;
@@ -217,10 +224,10 @@ interface TerrainFollowConfig {
 const DEFAULT_FOLLOW_CONFIG: TerrainFollowConfig = {
   trackWidth: 0.09,
   trackLength: 0.16,
-  rideHeight: 0.016,
+  rideHeight: 0.025,  // th * 0.88
   loadFactor: 1,
-  followSharpness: 0.3,
-  maxDropSpeed: 0.45,
+  followSharpness: 0.55,
+  maxDropSpeed: 0.6,
   allowTrackMarks: true,
 };
 
@@ -269,6 +276,37 @@ function stampTrackMarks(
   }
 }
 
+// ── Snap vehicle to terrain (call once on init or when spawning) ────
+export function initVehicleOnTerrain(
+  vehicle: VehicleState,
+  field: VoxelField,
+  config: Partial<TerrainFollowConfig> = {},
+) {
+  const cfg = { ...DEFAULT_FOLLOW_CONFIG, ...config };
+  const ch = Math.cos(vehicle.heading);
+  const sh = Math.sin(vehicle.heading);
+  const fwdX = sh, fwdZ = ch, rightX = ch, rightZ = -sh;
+  const halfLen = cfg.trackLength * 0.5;
+  const halfWidth = cfg.trackWidth * 0.5;
+
+  // Sample terrain at the 4 track corners
+  const corners = [
+    getTerrainHeight(field, vehicle.posX + fwdX * halfLen + rightX * halfWidth, vehicle.posZ + fwdZ * halfLen + rightZ * halfWidth),
+    getTerrainHeight(field, vehicle.posX + fwdX * halfLen - rightX * halfWidth, vehicle.posZ + fwdZ * halfLen - rightZ * halfWidth),
+    getTerrainHeight(field, vehicle.posX - fwdX * halfLen + rightX * halfWidth, vehicle.posZ - fwdZ * halfLen + rightZ * halfWidth),
+    getTerrainHeight(field, vehicle.posX - fwdX * halfLen - rightX * halfWidth, vehicle.posZ - fwdZ * halfLen - rightZ * halfWidth),
+  ];
+
+  const avg = corners.reduce((a, b) => a + b, 0) / corners.length;
+  vehicle.posY = avg + cfg.rideHeight;
+
+  const frontAvg = (corners[0] + corners[1]) * 0.5;
+  const backAvg = (corners[2] + corners[3]) * 0.5;
+  vehicle.pitch = Math.atan2(frontAvg - backAvg, cfg.trackLength);
+  vehicle.contactSink = 0;
+  vehicle.groundClearance = cfg.rideHeight;
+}
+
 // ── Update vehicle Y to follow terrain ──────────────────────────────
 export function updateVehicleTerrainFollow(
   vehicle: VehicleState,
@@ -288,38 +326,61 @@ export function updateVehicleTerrainFollow(
   const halfLen = cfg.trackLength * 0.5;
   const halfWidth = cfg.trackWidth * 0.5;
 
+  // 8-point contact: 4 corners + 4 midpoints for more stable sampling
   const contacts = [
+    // Corners
     { x: vehicle.posX + fwdX * halfLen + rightX * halfWidth, z: vehicle.posZ + fwdZ * halfLen + rightZ * halfWidth },
     { x: vehicle.posX + fwdX * halfLen - rightX * halfWidth, z: vehicle.posZ + fwdZ * halfLen - rightZ * halfWidth },
     { x: vehicle.posX - fwdX * halfLen + rightX * halfWidth, z: vehicle.posZ - fwdZ * halfLen + rightZ * halfWidth },
     { x: vehicle.posX - fwdX * halfLen - rightX * halfWidth, z: vehicle.posZ - fwdZ * halfLen - rightZ * halfWidth },
+    // Track midpoints (left and right)
     { x: vehicle.posX + rightX * halfWidth, z: vehicle.posZ + rightZ * halfWidth },
     { x: vehicle.posX - rightX * halfWidth, z: vehicle.posZ - rightZ * halfWidth },
+    // Front/back centers
+    { x: vehicle.posX + fwdX * halfLen, z: vehicle.posZ + fwdZ * halfLen },
+    { x: vehicle.posX - fwdX * halfLen, z: vehicle.posZ - fwdZ * halfLen },
   ];
 
   const surfaceYs = contacts.map((c) => getTerrainHeight(field, c.x, c.z));
   const sinkYs = contacts.map((c, i) => computeSinkDepth(c.x, surfaceYs[i], c.z, cfg.loadFactor));
+
+  // Use the HIGHEST contact point (tracks bridge over dips, don't average into holes)
+  // This prevents the machine from sinking into uneven terrain
   const contactYs = surfaceYs.map((y, i) => y - sinkYs[i]);
 
-  const frontAvg = (contactYs[0] + contactYs[1]) * 0.5;
-  const backAvg = (contactYs[2] + contactYs[3]) * 0.5;
-  const allAvg = contactYs.reduce((a, b) => a + b, 0) / contactYs.length;
-  const targetY = allAvg + cfg.rideHeight;
+  // For Y: use a weighted approach — mostly highest point, slightly avg to prevent hovering
+  const maxContact = Math.max(...contactYs);
+  const avgContact = contactYs.reduce((a, b) => a + b, 0) / contactYs.length;
+  // Blend: 70% max (prevents sinking), 30% avg (prevents hovering over bumps)
+  const blendedY = maxContact * 0.6 + avgContact * 0.4;
+  const targetY = blendedY + cfg.rideHeight;
 
+  // Stiff spring going UP (ground pushes vehicle up instantly)
+  // Gravity-limited going DOWN (vehicle falls at realistic rate)
   if (targetY > vehicle.posY) {
-    vehicle.posY += (targetY - vehicle.posY) * Math.min(1, cfg.followSharpness * 1.8);
+    // Going up: stiff spring, nearly instant for small bumps
+    const upDelta = targetY - vehicle.posY;
+    const upRate = upDelta < 0.005 ? 0.95 : Math.min(1, cfg.followSharpness * 2.5);
+    vehicle.posY += upDelta * upRate;
   } else {
+    // Going down: gravity-limited drop
     const maxDrop = cfg.maxDropSpeed * dt;
-    vehicle.posY += Math.max(targetY - vehicle.posY, -maxDrop);
+    const downDelta = vehicle.posY - targetY;
+    // Smooth approach: faster when far, slower when close
+    const dropAmount = Math.min(downDelta, maxDrop, downDelta * cfg.followSharpness * 3);
+    vehicle.posY -= dropAmount;
   }
 
+  // Pitch from front-back height difference
+  const frontAvg = (contactYs[0] + contactYs[1] + contactYs[6]) / 3; // front corners + front center
+  const backAvg = (contactYs[2] + contactYs[3] + contactYs[7]) / 3;  // back corners + back center
   const targetPitch = Math.atan2(frontAvg - backAvg, cfg.trackLength);
-  vehicle.pitch += (targetPitch - vehicle.pitch) * Math.min(1, cfg.followSharpness);
+  vehicle.pitch += (targetPitch - vehicle.pitch) * Math.min(1, cfg.followSharpness * 1.5);
 
   const avgSurface = surfaceYs.reduce((a, b) => a + b, 0) / surfaceYs.length;
   const avgSink = sinkYs.reduce((a, b) => a + b, 0) / sinkYs.length;
   vehicle.contactSink = avgSink;
-  vehicle.groundClearance = Math.max(0, vehicle.posY - avgSurface);
+  vehicle.groundClearance = Math.max(0, vehicle.posY - cfg.rideHeight - avgSurface);
 
   const driveIntensity = clamp01((Math.abs(vehicle.tracks.leftSpeed) + Math.abs(vehicle.tracks.rightSpeed)) * 0.5);
   if (cfg.allowTrackMarks && driveIntensity > 0.08) {

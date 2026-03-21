@@ -23,7 +23,7 @@ import { EquipmentType, ExcavatorState, BulldozerState } from '@/lib/equipment/t
 import { createExcavatorState, updateExcavator, computeExcavatorFK } from '@/lib/equipment/excavator';
 import { createBulldozerState, updateBulldozer } from '@/lib/equipment/bulldozer';
 import { initControls, pollControls, getExcavatorInputs, getBulldozerInputs } from '@/lib/equipment/controls';
-import { excavatorDig, bulldozerPush, updateVehicleTerrainFollow } from '@/lib/equipment/terrainInteraction';
+import { excavatorDig, bulldozerPush, updateVehicleTerrainFollow, initVehicleOnTerrain } from '@/lib/equipment/terrainInteraction';
 import { craterImpact, explosiveImpact } from '@/lib/equipment/impacts';
 import { ExcavatorMesh, BulldozerMesh } from '@/components/EquipmentRenderer';
 
@@ -433,18 +433,18 @@ function EquipmentController({
       const inputs = getExcavatorInputs(ctrl);
       updateExcavator(es.excavator, clampedDt, inputs);
       updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-        trackWidth: 0.09,
-        trackLength: 0.17,
-        rideHeight: 0.018,
+        trackWidth: 0.10,
+        trackLength: 0.16,
+        rideHeight: 0.025,   // excavator th=0.028, pads at -th*0.88 ≈ -0.025
         loadFactor: 0.95,
-        followSharpness: 0.36,
-        maxDropSpeed: 0.45,
+        followSharpness: 0.55,
+        maxDropSpeed: 0.6,
       });
       // Keep inactive dozer pinned to terrain but don't stamp marks
       updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-        trackWidth: 0.11,
-        trackLength: 0.19,
-        rideHeight: 0.021,
+        trackWidth: 0.13,
+        trackLength: 0.20,
+        rideHeight: 0.028,   // bulldozer th=0.032, pads at -th*0.88 ≈ -0.028
         loadFactor: 1.2,
         allowTrackMarks: false,
       });
@@ -464,18 +464,18 @@ function EquipmentController({
       const inputs = getBulldozerInputs(ctrl);
       updateBulldozer(es.bulldozer, clampedDt, inputs);
       updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-        trackWidth: 0.11,
-        trackLength: 0.19,
-        rideHeight: 0.021,
+        trackWidth: 0.13,
+        trackLength: 0.20,
+        rideHeight: 0.028,
         loadFactor: 1.2,
-        followSharpness: 0.32,
-        maxDropSpeed: 0.4,
+        followSharpness: 0.50,
+        maxDropSpeed: 0.5,
       });
-      // Keep inactive excavator pinned to terrain but don't stamp marks
+      // Keep inactive excavator pinned
       updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-        trackWidth: 0.09,
-        trackLength: 0.17,
-        rideHeight: 0.018,
+        trackWidth: 0.10,
+        trackLength: 0.16,
+        rideHeight: 0.025,
         loadFactor: 0.95,
         allowTrackMarks: false,
       });
@@ -491,16 +491,16 @@ function EquipmentController({
 
     if (es.activeEquipment === 'none') {
       updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-        trackWidth: 0.09,
-        trackLength: 0.17,
-        rideHeight: 0.018,
+        trackWidth: 0.10,
+        trackLength: 0.16,
+        rideHeight: 0.025,
         loadFactor: 0.95,
         allowTrackMarks: false,
       });
       updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-        trackWidth: 0.11,
-        trackLength: 0.19,
-        rideHeight: 0.021,
+        trackWidth: 0.13,
+        trackLength: 0.20,
+        rideHeight: 0.028,
         loadFactor: 1.2,
         allowTrackMarks: false,
       });
@@ -627,6 +627,16 @@ function SoilTerrain({
     field.initTerrain();
     fieldRef.current = field;
     simRef.current = new SoilSimulator(field);
+
+    // Snap both vehicles onto terrain surface immediately
+    const es = equipmentState.current;
+    initVehicleOnTerrain(es.excavator.vehicle, field, {
+      trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+    });
+    initVehicleOnTerrain(es.bulldozer.vehicle, field, {
+      trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+    });
+
     rebuildMesh();
   }, [rebuildMesh]);
 
