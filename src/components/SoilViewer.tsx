@@ -433,18 +433,18 @@ function EquipmentController({
       const inputs = getExcavatorInputs(ctrl);
       updateExcavator(es.excavator, clampedDt, inputs);
       updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-        trackWidth: 0.09,
-        trackLength: 0.17,
-        rideHeight: 0.018,
+        trackWidth: 0.10,
+        trackLength: 0.16,
+        rideHeight: 0.025,   // excavator th=0.028, pads at -th*0.88 ≈ -0.025
         loadFactor: 0.95,
-        followSharpness: 0.36,
-        maxDropSpeed: 0.45,
+        followSharpness: 0.55,
+        maxDropSpeed: 0.6,
       });
       // Keep inactive dozer pinned to terrain but don't stamp marks
       updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-        trackWidth: 0.11,
-        trackLength: 0.19,
-        rideHeight: 0.021,
+        trackWidth: 0.13,
+        trackLength: 0.20,
+        rideHeight: 0.028,   // bulldozer th=0.032, pads at -th*0.88 ≈ -0.028
         loadFactor: 1.2,
         allowTrackMarks: false,
       });
