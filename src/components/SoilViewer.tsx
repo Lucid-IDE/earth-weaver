@@ -627,6 +627,16 @@ function SoilTerrain({
     field.initTerrain();
     fieldRef.current = field;
     simRef.current = new SoilSimulator(field);
+
+    // Snap both vehicles onto terrain surface immediately
+    const es = equipmentState.current;
+    initVehicleOnTerrain(es.excavator.vehicle, field, {
+      trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+    });
+    initVehicleOnTerrain(es.bulldozer.vehicle, field, {
+      trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+    });
+
     rebuildMesh();
   }, [rebuildMesh]);
 
