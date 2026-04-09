@@ -25,6 +25,11 @@ import { createBulldozerState, updateBulldozer } from '@/lib/equipment/bulldozer
 import { initControls, pollControls, getExcavatorInputs, getBulldozerInputs } from '@/lib/equipment/controls';
 import { excavatorDig, bulldozerPush, updateVehicleTerrainFollow, initVehicleOnTerrain } from '@/lib/equipment/terrainInteraction';
 import { craterImpact, explosiveImpact } from '@/lib/equipment/impacts';
+import {
+  VehiclePhysicsState, createVehiclePhysics,
+  createExcavatorMass, createBulldozerMass,
+  updateVehiclePhysics,
+} from '@/lib/equipment/vehiclePhysics';
 import { ExcavatorMesh, BulldozerMesh } from '@/components/EquipmentRenderer';
 
 export interface SoilStats {
