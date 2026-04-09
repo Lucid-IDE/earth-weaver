@@ -413,6 +413,8 @@ function EquipmentController({
     excavator: ExcavatorState;
     bulldozer: BulldozerState;
     impactMode: string | null;
+    excPhysics: VehiclePhysicsState;
+    dozPhysics: VehiclePhysicsState;
   }>;
 }) {
   useEffect(() => { initControls(); }, []);
@@ -434,32 +436,58 @@ function EquipmentController({
     
     let terrainChanged = false;
     
+    // Terrain softness at vehicle position (affects traction)
+    const getTerrainSoftness = (veh: { posX: number; posZ: number }) => {
+      try {
+        const { getMaterialAt } = require('@/lib/soil/materialBrain');
+        const mat = getMaterialAt(veh.posX, 0, veh.posZ);
+        return mat.moisture * 0.6 + (1 - mat.frictionAngle / (45 * 0.0174533)) * 0.4;
+      } catch {
+        return 0.2;
+      }
+    };
+    
     if (es.activeEquipment === 'excavator') {
       const inputs = getExcavatorInputs(ctrl);
-      updateExcavator(es.excavator, clampedDt, inputs);
+      
+      // Compute hydraulic demand from arm inputs
+      const armDemand = Math.min(1,
+        Math.abs(inputs.boomInput) * 0.4 +
+        Math.abs(inputs.stickInput) * 0.3 +
+        Math.abs(inputs.bucketInput) * 0.2 +
+        Math.abs(inputs.swingInput) * 0.15
+      );
+      
+      // Physics-driven movement (engine → torque converter → tracks)
+      updateVehiclePhysics(
+        es.excPhysics, es.excavator.vehicle,
+        inputs.leftTrack, inputs.rightTrack,
+        armDemand,
+        getTerrainSoftness(es.excavator.vehicle),
+        clampedDt,
+      );
+      
+      // Hydraulic-limited arm actuation
+      updateExcavator(es.excavator, clampedDt, inputs, es.excPhysics.hydraulics);
+      
+      // Terrain following (Y position + pitch)
       updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-        trackWidth: 0.10,
-        trackLength: 0.16,
-        rideHeight: 0.025,   // excavator th=0.028, pads at -th*0.88 ≈ -0.025
-        loadFactor: 0.95,
-        followSharpness: 0.55,
-        maxDropSpeed: 0.6,
-      });
-      // Keep inactive dozer pinned to terrain but don't stamp marks
-      updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-        trackWidth: 0.13,
-        trackLength: 0.20,
-        rideHeight: 0.028,   // bulldozer th=0.032, pads at -th*0.88 ≈ -0.028
-        loadFactor: 1.2,
-        allowTrackMarks: false,
+        trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+        loadFactor: 0.95 + es.excavator.bucketFill * 0.3,
+        followSharpness: 0.55, maxDropSpeed: 0.6,
       });
       
-      // Dig/scoop/drop when the arm is actively used or carrying material
+      // Inactive dozer follows terrain passively
+      updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
+        trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+        loadFactor: 1.2, allowTrackMarks: false,
+      });
+      
+      // Dig/scoop/drop
       const armActive = Math.abs(inputs.boomInput) + Math.abs(inputs.stickInput) + Math.abs(inputs.bucketInput) > 0.01;
       if (armActive || es.excavator.bucketFill > 0.01) {
         const didDig = excavatorDig(es.excavator, field, sim, {
-          bucketInput: inputs.bucketInput,
-          dt: clampedDt,
+          bucketInput: inputs.bucketInput, dt: clampedDt,
         });
         if (didDig) terrainChanged = true;
       }
@@ -467,26 +495,38 @@ function EquipmentController({
     
     if (es.activeEquipment === 'bulldozer') {
       const inputs = getBulldozerInputs(ctrl);
-      updateBulldozer(es.bulldozer, clampedDt, inputs);
+      
+      // Hydraulic demand from blade controls
+      const bladeDemand = Math.min(1,
+        Math.abs(inputs.bladeUp) * 0.5 +
+        Math.abs(inputs.bladeTiltInput) * 0.2 +
+        Math.abs(inputs.bladeAngleInput) * 0.15
+      );
+      
+      // Physics-driven movement
+      updateVehiclePhysics(
+        es.dozPhysics, es.bulldozer.vehicle,
+        inputs.leftTrack, inputs.rightTrack,
+        bladeDemand,
+        getTerrainSoftness(es.bulldozer.vehicle),
+        clampedDt,
+      );
+      
+      // Hydraulic-limited blade control
+      updateBulldozer(es.bulldozer, clampedDt, inputs, es.dozPhysics.hydraulics);
+      
       updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-        trackWidth: 0.13,
-        trackLength: 0.20,
-        rideHeight: 0.028,
-        loadFactor: 1.2,
-        followSharpness: 0.50,
-        maxDropSpeed: 0.5,
-      });
-      // Keep inactive excavator pinned
-      updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-        trackWidth: 0.10,
-        trackLength: 0.16,
-        rideHeight: 0.025,
-        loadFactor: 0.95,
-        allowTrackMarks: false,
+        trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+        loadFactor: 1.2, followSharpness: 0.50, maxDropSpeed: 0.5,
       });
       
-      // Continuous pushing when moving with blade down
-      const isMoving = Math.abs(inputs.leftTrack) + Math.abs(inputs.rightTrack) > 0;
+      updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
+        trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+        loadFactor: 0.95, allowTrackMarks: false,
+      });
+      
+      // Blade pushing (uses actual physics velocity, not input)
+      const isMoving = Math.abs(es.dozPhysics.forwardVelocity) > 0.002;
       const bladeEngaged = es.bulldozer.bladeHeight < 0.03;
       if (isMoving && bladeEngaged) {
         const didPush = bulldozerPush(es.bulldozer, field, sim);
@@ -496,18 +536,12 @@ function EquipmentController({
 
     if (es.activeEquipment === 'none') {
       updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-        trackWidth: 0.10,
-        trackLength: 0.16,
-        rideHeight: 0.025,
-        loadFactor: 0.95,
-        allowTrackMarks: false,
+        trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+        loadFactor: 0.95, allowTrackMarks: false,
       });
       updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-        trackWidth: 0.13,
-        trackLength: 0.20,
-        rideHeight: 0.028,
-        loadFactor: 1.2,
-        allowTrackMarks: false,
+        trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+        loadFactor: 1.2, allowTrackMarks: false,
       });
     }
 
@@ -517,7 +551,6 @@ function EquipmentController({
     
     // Impact triggers
     if (ctrl.triggerImpact) {
-      // Impact at center of view (or at equipment bucket tip)
       let pos: [number, number, number] = [0, 0, 0];
       if (es.activeEquipment === 'excavator') {
         const fk = computeExcavatorFK(es.excavator);
@@ -542,18 +575,8 @@ function EquipmentController({
   
   return (
     <>
-      {es.activeEquipment !== 'none' && (
-        <>
-          <ExcavatorMesh state={es.excavator} />
-          <BulldozerMesh state={es.bulldozer} />
-        </>
-      )}
-      {es.activeEquipment === 'none' && (
-        <>
-          <ExcavatorMesh state={es.excavator} />
-          <BulldozerMesh state={es.bulldozer} />
-        </>
-      )}
+      <ExcavatorMesh state={es.excavator} />
+      <BulldozerMesh state={es.bulldozer} />
     </>
   );
 }
