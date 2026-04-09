@@ -600,6 +600,8 @@ function SoilTerrain({
     excavator: createExcavatorState(),
     bulldozer: createBulldozerState(),
     impactMode: null as string | null,
+    excPhysics: createVehiclePhysics(createExcavatorMass(), 1.8, 2200),
+    dozPhysics: createVehiclePhysics(createBulldozerMass(), 2.2, 2100),
   });
 
   const material = useMemo(() => new THREE.ShaderMaterial({
