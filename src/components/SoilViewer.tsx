@@ -6,6 +6,7 @@ import { VoxelField } from '@/lib/soil/VoxelField';
 import { SoilSimulator } from '@/lib/soil/soilSim';
 import { soilVertexShader, soilFragmentShader } from '@/lib/soil/soilShader';
 import { DIG_RADIUS } from '@/lib/soil/constants';
+import { getMaterialAt } from '@/lib/soil/materialBrain';
 import { mpmToWorld } from '@/lib/mpm/bridge';
 import { triggerAutoCapture, createSettleDetector } from '@/lib/analyst/autoCapture';
 import {
@@ -438,13 +439,8 @@ function EquipmentController({
     
     // Terrain softness at vehicle position (affects traction)
     const getTerrainSoftness = (veh: { posX: number; posZ: number }) => {
-      try {
-        const { getMaterialAt } = require('@/lib/soil/materialBrain');
-        const mat = getMaterialAt(veh.posX, 0, veh.posZ);
-        return mat.moisture * 0.6 + (1 - mat.frictionAngle / (45 * 0.0174533)) * 0.4;
-      } catch {
-        return 0.2;
-      }
+      const mat = getMaterialAt(veh.posX, 0, veh.posZ);
+      return mat.moisture * 0.6 + (1 - mat.frictionAngle / (45 * 0.0174533)) * 0.4;
     };
     
     if (es.activeEquipment === 'excavator') {
