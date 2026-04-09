@@ -7,6 +7,7 @@
 // Scaled to world units where 1.0 ≈ 2m
 
 import { ExcavatorState, DEG } from './types';
+import { hydraulicActuatorSpeed, HydraulicSystem } from './vehiclePhysics';
 
 // ── Realistic joint limits (based on real excavator specs) ──────────
 const BOOM_LENGTH = 0.22;   // ~4.4m real
@@ -52,6 +53,32 @@ function clampJoint(joint: { angle: number; minAngle: number; maxAngle: number }
   joint.angle = Math.max(joint.minAngle, Math.min(joint.maxAngle, joint.angle));
 }
 
+// Compute load factor for a joint based on arm geometry and bucket fill
+function computeArmLoad(state: ExcavatorState, joint: string): number {
+  const armWeight = 0.3; // base arm weight factor
+  const bucketLoad = 0.2 + state.bucketFill * 0.8; // heavier when loaded
+  
+  switch (joint) {
+    case 'boom':
+      // Boom bears the weight of stick + bucket + load
+      // Heavier when arm is extended horizontally
+      return armWeight + bucketLoad + Math.abs(Math.cos(state.boom.angle)) * 0.3;
+    case 'stick':
+      return armWeight * 0.6 + bucketLoad;
+    case 'bucket':
+      return bucketLoad * 0.5;
+    case 'swing':
+      // Swing inertia increases with arm extension
+      return 0.2 + Math.abs(Math.cos(state.boom.angle)) * 0.3;
+    default:
+      return 0.5;
+  }
+}
+
+/**
+ * Update excavator joints using hydraulic system for realistic speed limiting.
+ * When hydraulics is null, falls back to base speed (for backward compat).
+ */
 export function updateExcavator(
   state: ExcavatorState,
   dt: number,
@@ -62,13 +89,30 @@ export function updateExcavator(
     bucketInput: number;
     leftTrack: number;
     rightTrack: number;
-  }
+  },
+  hydraulics?: HydraulicSystem | null,
 ) {
-  // Update joints
-  state.swing.angle += inputs.swingInput * state.swing.speed * dt;
-  state.boom.angle += inputs.boomInput * state.boom.speed * dt;
-  state.stick.angle += inputs.stickInput * state.stick.speed * dt;
-  state.bucket.angle += inputs.bucketInput * state.bucket.speed * dt;
+  // Update joints with hydraulic-limited speeds
+  if (hydraulics) {
+    const swingLoad = computeArmLoad(state, 'swing');
+    const boomLoad = computeArmLoad(state, 'boom');
+    const stickLoad = computeArmLoad(state, 'stick');
+    const bucketLoad = computeArmLoad(state, 'bucket');
+    
+    // Boom down is gravity-assisted (faster), boom up fights gravity
+    const boomGravityFactor = inputs.boomInput > 0 ? 1.0 : 1.4; // down is easier
+    
+    state.swing.angle += inputs.swingInput * hydraulicActuatorSpeed(hydraulics, state.swing.speed, swingLoad) * dt;
+    state.boom.angle += inputs.boomInput * hydraulicActuatorSpeed(hydraulics, state.boom.speed, boomLoad) * boomGravityFactor * dt;
+    state.stick.angle += inputs.stickInput * hydraulicActuatorSpeed(hydraulics, state.stick.speed, stickLoad) * dt;
+    state.bucket.angle += inputs.bucketInput * hydraulicActuatorSpeed(hydraulics, state.bucket.speed, bucketLoad) * dt;
+  } else {
+    // Legacy direct mode
+    state.swing.angle += inputs.swingInput * state.swing.speed * dt;
+    state.boom.angle += inputs.boomInput * state.boom.speed * dt;
+    state.stick.angle += inputs.stickInput * state.stick.speed * dt;
+    state.bucket.angle += inputs.bucketInput * state.bucket.speed * dt;
+  }
 
   clampJoint(state.swing);
   clampJoint(state.boom);
@@ -79,23 +123,10 @@ export function updateExcavator(
   const armActivity = Math.abs(inputs.boomInput) + Math.abs(inputs.stickInput) + Math.abs(inputs.bucketInput);
   state.hydraulicPressure += (Math.min(1, armActivity) - state.hydraulicPressure) * 5 * dt;
 
-  // Track drive
+  // NOTE: Track drive is now handled by vehiclePhysics.updateVehiclePhysics()
+  // We still store track speeds for the renderer but don't compute position here
   state.vehicle.tracks.leftSpeed = inputs.leftTrack;
   state.vehicle.tracks.rightSpeed = inputs.rightTrack;
-
-  const trackWidth = 0.10; // matches renderer track gauge
-  const forward = (inputs.leftTrack + inputs.rightTrack) * 0.5;
-  const turn = (inputs.rightTrack - inputs.leftTrack) / trackWidth;
-
-  state.vehicle.speed = forward * 0.15 * dt;
-  state.vehicle.turnRate = turn * 0.8 * dt;
-
-  state.vehicle.heading += state.vehicle.turnRate;
-  state.vehicle.posX += Math.sin(state.vehicle.heading) * state.vehicle.speed;
-  state.vehicle.posZ += Math.cos(state.vehicle.heading) * state.vehicle.speed;
-
-  state.vehicle.posX = Math.max(-0.7, Math.min(0.7, state.vehicle.posX));
-  state.vehicle.posZ = Math.max(-0.7, Math.min(0.7, state.vehicle.posZ));
 }
 
 // ── World-space FK (for terrain interaction) ────────────────────────
@@ -182,14 +213,11 @@ export function computeExcavatorFK(state: ExcavatorState): ExcavatorFK {
 }
 
 // ── Local-space FK (for renderer) ───────────────────────────────────
-// Returns positions relative to the swing group origin.
-// In this space: +Z = forward (arm direction), +Y = up
 export interface ExcavatorLocalFK {
   boomPivot: [number, number, number];
   boomEnd: [number, number, number];
   stickEnd: [number, number, number];
   bucketTip: [number, number, number];
-  // Hydraulic attachment points (anatomically correct)
   boomCylBase: [number, number, number];
   boomCylEnd: [number, number, number];
   stickCylBase: [number, number, number];
@@ -199,77 +227,41 @@ export interface ExcavatorLocalFK {
 }
 
 export function computeExcavatorLocalFK(state: ExcavatorState): ExcavatorLocalFK {
-  // Boom pivot: front of cab, raised above turntable
   const boomPivot: [number, number, number] = [0, CAB_HEIGHT + 0.028, PIVOT_OFFSET];
 
-  // Boom end
   const boomHoriz = Math.cos(state.boom.angle) * BOOM_LENGTH;
   const boomVert = Math.sin(state.boom.angle) * BOOM_LENGTH;
-  const boomEnd: [number, number, number] = [
-    0,
-    boomPivot[1] + boomVert,
-    boomPivot[2] + boomHoriz,
-  ];
+  const boomEnd: [number, number, number] = [0, boomPivot[1] + boomVert, boomPivot[2] + boomHoriz];
 
-  // Stick end
   const stickAbs = state.boom.angle + state.stick.angle;
   const stickHoriz = Math.cos(stickAbs) * STICK_LENGTH;
   const stickVert = Math.sin(stickAbs) * STICK_LENGTH;
-  const stickEnd: [number, number, number] = [
-    0,
-    boomEnd[1] + stickVert,
-    boomEnd[2] + stickHoriz,
-  ];
+  const stickEnd: [number, number, number] = [0, boomEnd[1] + stickVert, boomEnd[2] + stickHoriz];
 
-  // Bucket tip
   const bucketAbs = stickAbs + state.bucket.angle;
   const bucketHoriz = Math.cos(bucketAbs) * BUCKET_LENGTH;
   const bucketVert = Math.sin(bucketAbs) * BUCKET_LENGTH;
-  const bucketTip: [number, number, number] = [
-    0,
-    stickEnd[1] + bucketVert,
-    stickEnd[2] + bucketHoriz,
-  ];
+  const bucketTip: [number, number, number] = [0, stickEnd[1] + bucketVert, stickEnd[2] + bucketHoriz];
 
-  // ── Hydraulic attachment points ──
-  // Real excavator: boom cylinders attach from the cab body (below boom pivot)
-  // to about 30% up the boom, on the underside.
-  const boomCylBase: [number, number, number] = [
-    0,
-    CAB_HEIGHT + 0.01,  // cab body, below pivot
-    PIVOT_OFFSET - 0.01,
-  ];
+  // Hydraulic attachment points
+  const boomCylBase: [number, number, number] = [0, CAB_HEIGHT + 0.01, PIVOT_OFFSET - 0.01];
   const boomFrac = 0.30;
   const boomCylEnd: [number, number, number] = [
-    0,
-    boomPivot[1] + boomVert * boomFrac - 0.008, // underside of boom
-    boomPivot[2] + boomHoriz * boomFrac,
+    0, boomPivot[1] + boomVert * boomFrac - 0.008, boomPivot[2] + boomHoriz * boomFrac,
   ];
 
-  // Stick cylinder: mounts on top of boom (about 60% along) and extends
-  // to the stick side of the boom-stick pin (about 15% along stick)
   const stickCylBase: [number, number, number] = [
-    0,
-    boomPivot[1] + boomVert * 0.6 + 0.01, // top of boom
-    boomPivot[2] + boomHoriz * 0.6,
+    0, boomPivot[1] + boomVert * 0.6 + 0.01, boomPivot[2] + boomHoriz * 0.6,
   ];
   const stickCylEnd: [number, number, number] = [
-    0,
-    boomEnd[1] + stickVert * 0.15,
-    boomEnd[2] + stickHoriz * 0.15,
+    0, boomEnd[1] + stickVert * 0.15, boomEnd[2] + stickHoriz * 0.15,
   ];
 
-  // Bucket linkage: runs from about 70% along stick to 40% along bucket
-  // (In reality this is a 4-bar linkage; we simplify to a cylinder)
   const bucketLinkBase: [number, number, number] = [
-    0,
-    boomEnd[1] + stickVert * 0.7 + 0.008,
-    boomEnd[2] + stickHoriz * 0.7,
+    0, boomEnd[1] + stickVert * 0.7 + 0.008, boomEnd[2] + stickHoriz * 0.7,
   ];
   const bucketLinkEnd: [number, number, number] = [
-    0,
-    stickEnd[1] + bucketVert * 0.4,
-    stickEnd[2] + bucketHoriz * 0.4,
+    0, stickEnd[1] + bucketVert * 0.4, stickEnd[2] + bucketHoriz * 0.4,
   ];
 
   return {

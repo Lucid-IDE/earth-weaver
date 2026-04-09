@@ -2,6 +2,7 @@
 // Tracked vehicle with adjustable blade height/tilt/angle + rear rippers
 
 import { BulldozerState, DEG } from './types';
+import { hydraulicActuatorSpeed, HydraulicSystem } from './vehiclePhysics';
 
 export function createBulldozerState(): BulldozerState {
   return {
@@ -25,44 +26,51 @@ export function createBulldozerState(): BulldozerState {
   };
 }
 
+/**
+ * Update bulldozer blade/ripper controls. Hydraulic-limited when system provided.
+ * NOTE: Track drive is handled by vehiclePhysics.updateVehiclePhysics()
+ */
 export function updateBulldozer(
   state: BulldozerState,
   dt: number,
   inputs: {
     leftTrack: number;
     rightTrack: number;
-    bladeUp: number;      // -1 to 1
-    bladeTiltInput: number; // -1 to 1
-    bladeAngleInput: number; // -1 to 1
+    bladeUp: number;
+    bladeTiltInput: number;
+    bladeAngleInput: number;
     toggleRippers: boolean;
-  }
+  },
+  hydraulics?: HydraulicSystem | null,
 ) {
-  // Track drive — bulldozer is slower but more powerful
+  // Store track input for renderer (actual drive handled by physics engine)
   state.vehicle.tracks.leftSpeed = inputs.leftTrack;
   state.vehicle.tracks.rightSpeed = inputs.rightTrack;
   
-  const trackWidth = 0.14;
-  const forward = (inputs.leftTrack + inputs.rightTrack) * 0.5;
-  const turn = (inputs.rightTrack - inputs.leftTrack) / trackWidth;
+  // Blade controls with hydraulic speed limiting
+  const bladeBaseSpeed = 0.15; // m/s blade lift speed
+  const tiltBaseSpeed = 20 * DEG;
+  const angleBaseSpeed = 25 * DEG;
   
-  state.vehicle.speed = forward * 0.1 * dt;
-  state.vehicle.turnRate = turn * 0.6 * dt;
+  if (hydraulics) {
+    // Blade lift: heavy load (fighting gravity + soil)
+    const liftLoad = 0.5 + (inputs.bladeUp < 0 ? 0.3 : 0); // lowering is heavier (pushing into soil)
+    const bladeSpeed = hydraulicActuatorSpeed(hydraulics, bladeBaseSpeed, liftLoad);
+    state.bladeHeight += inputs.bladeUp * bladeSpeed * dt;
+    
+    const tiltSpeed = hydraulicActuatorSpeed(hydraulics, tiltBaseSpeed, 0.4);
+    state.bladeTilt += inputs.bladeTiltInput * tiltSpeed * dt;
+    
+    const angleSpeed = hydraulicActuatorSpeed(hydraulics, angleBaseSpeed, 0.3);
+    state.bladeAngle += inputs.bladeAngleInput * angleSpeed * dt;
+  } else {
+    state.bladeHeight += inputs.bladeUp * bladeBaseSpeed * dt;
+    state.bladeTilt += inputs.bladeTiltInput * tiltBaseSpeed * dt;
+    state.bladeAngle += inputs.bladeAngleInput * angleBaseSpeed * dt;
+  }
   
-  state.vehicle.heading += state.vehicle.turnRate;
-  state.vehicle.posX += Math.sin(state.vehicle.heading) * state.vehicle.speed;
-  state.vehicle.posZ += Math.cos(state.vehicle.heading) * state.vehicle.speed;
-  
-  state.vehicle.posX = Math.max(-0.7, Math.min(0.7, state.vehicle.posX));
-  state.vehicle.posZ = Math.max(-0.7, Math.min(0.7, state.vehicle.posZ));
-  
-  // Blade controls
-  state.bladeHeight += inputs.bladeUp * 0.15 * dt;
   state.bladeHeight = Math.max(state.bladeMinHeight, Math.min(state.bladeMaxHeight, state.bladeHeight));
-  
-  state.bladeTilt += inputs.bladeTiltInput * 20 * DEG * dt;
   state.bladeTilt = Math.max(-15 * DEG, Math.min(15 * DEG, state.bladeTilt));
-  
-  state.bladeAngle += inputs.bladeAngleInput * 25 * DEG * dt;
   state.bladeAngle = Math.max(-20 * DEG, Math.min(20 * DEG, state.bladeAngle));
   
   if (inputs.toggleRippers) {
@@ -76,7 +84,7 @@ export interface BladeGeometry {
   left: [number, number, number];
   right: [number, number, number];
   bladeNormal: [number, number, number];
-  samplePoints: [number, number, number][];  // points along blade edge for SDF stamps
+  samplePoints: [number, number, number][];
 }
 
 export function computeBladeGeometry(state: BulldozerState): BladeGeometry {
@@ -84,7 +92,6 @@ export function computeBladeGeometry(state: BulldozerState): BladeGeometry {
   const ch = Math.cos(v.heading);
   const sh = Math.sin(v.heading);
   
-  // Blade is at front of vehicle
   const bladeOffset = 0.09;
   const bladeY = v.posY + state.bladeHeight;
   
@@ -94,13 +101,11 @@ export function computeBladeGeometry(state: BulldozerState): BladeGeometry {
     v.posZ + ch * bladeOffset,
   ];
   
-  // Perpendicular to heading (with blade angle)
   const bladeHeading = v.heading + state.bladeAngle;
   const cbh = Math.cos(bladeHeading);
   const sbh = Math.sin(bladeHeading);
   const halfWidth = state.bladeWidth / 2;
   
-  // Tilt adjusts Y of left vs right
   const tiltDelta = Math.sin(state.bladeTilt) * halfWidth;
   
   const left: [number, number, number] = [
@@ -115,10 +120,8 @@ export function computeBladeGeometry(state: BulldozerState): BladeGeometry {
     center[2] + sbh * halfWidth,
   ];
   
-  // Blade normal (pushes forward)
   const bladeNormal: [number, number, number] = [sh, 0, ch];
   
-  // Sample points along blade edge
   const numSamples = 7;
   const samplePoints: [number, number, number][] = [];
   for (let i = 0; i < numSamples; i++) {
