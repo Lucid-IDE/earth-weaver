@@ -142,11 +142,15 @@ function PinJoint({ pos, radius = 0.006 }: { pos: [number, number, number]; radi
 }
 
 // ── Track Assembly ──────────────────────────────────────────────────
-// Realistic tracked undercarriage with sprocket, idler, rollers, track pads
+// Realistic tracked undercarriage with sprocket, idler, rollers, track pads.
+// Pads SCROLL based on track travel (real linear distance, not frame count)
+// and exhibit SLACK sag when slipping (slack 0..1).
 function TrackAssembly({
   side, // -1 = left, 1 = right
   trackWidth, trackLength, trackHeight,
   numRollers = 6, numPads = 14,
+  travel = 0,
+  slack = 0,
 }: {
   side: number;
   trackWidth: number;
@@ -154,8 +158,17 @@ function TrackAssembly({
   trackHeight: number;
   numRollers?: number;
   numPads?: number;
+  travel?: number;
+  slack?: number;
 }) {
   const xOff = side * trackWidth / 2;
+  // Convert linear travel (world u) into a phase along the track perimeter.
+  // Loop length ≈ 2 × trackLength (top + bottom runs). Pads roll continuously.
+  const loopLen = trackLength * 1.9;
+  const padPhase = ((travel % loopLen) + loopLen) % loopLen;
+  const padPitchBottom = (trackLength * 0.9) / numPads;
+  // Slack sag: bottom run pads droop slightly between rollers.
+  const sag = slack * 0.004;
   const padWidth = 0.024;
   const frameWidth = 0.008;
   const rollerRadius = trackHeight * 0.35;
