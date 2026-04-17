@@ -7,6 +7,12 @@
 //   Bulldozer: CAT D6 class (20-ton, ~150kW diesel)
 
 import { VehicleState } from './types';
+import {
+  computeTrackForces,
+  getTerramechParams,
+  type SoilTerramechParams,
+} from './terramechanics';
+import { createRigidBody, integrateRigidBody, RigidBodyState } from './rigidBody';
 
 export const DEG = Math.PI / 180;
 
@@ -196,11 +202,20 @@ export interface VehiclePhysicsState {
   hydraulics: HydraulicSystem;
   drivetrain: DrivetrainState;
   mass: MassProperties;
-  
+  rigidBody: RigidBodyState;
+
+  // Per-track shear-deformation memory (Janosi)
+  leftShearJ: number;
+  rightShearJ: number;
+  // Latest per-track terramechanics readouts (for HUD / debug)
+  leftSinkage: number;
+  rightSinkage: number;
+  shearMobilization: number;
+
   // Derived motion state
   forwardVelocity: number;   // world units/s
   angularVelocity: number;   // rad/s (yaw)
-  
+
   // Ground interaction
   groundResistance: number;  // 0-1 current rolling resistance factor
   slopeResistance: number;   // additional from grade
@@ -218,6 +233,12 @@ export function createVehiclePhysics(
     hydraulics: createHydraulicSystem(),
     drivetrain: createDrivetrain(),
     mass,
+    rigidBody: createRigidBody(mass.mass),
+    leftShearJ: 0,
+    rightShearJ: 0,
+    leftSinkage: 0,
+    rightSinkage: 0,
+    shearMobilization: 0,
     forwardVelocity: 0,
     angularVelocity: 0,
     groundResistance: 0,
