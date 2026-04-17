@@ -553,6 +553,11 @@ function gridToParticle(state: MPMSolverState, dt: number) {
     state.vy[p] = newVy;
     state.vz[p] = newVz;
 
+    // ── Pore-pressure drainage (Darcy-like): moisture slowly evaporates ──
+    if (state.moisture[p] > 0) {
+      state.moisture[p] = Math.max(0, state.moisture[p] - 0.012 * dt);
+    }
+
     // Update deformation gradient: F = (I + dt * C) * F_old
     const fOff = p * 9;
     const Fold = [
