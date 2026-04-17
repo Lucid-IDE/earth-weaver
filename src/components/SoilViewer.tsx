@@ -31,6 +31,8 @@ import {
   createExcavatorMass, createBulldozerMass,
   updateVehiclePhysics,
 } from '@/lib/equipment/vehiclePhysics';
+import { getTerramechParams } from '@/lib/equipment/terramechanics';
+import { applyChassisTorque } from '@/lib/equipment/rigidBody';
 import { ExcavatorMesh, BulldozerMesh } from '@/components/EquipmentRenderer';
 
 export interface SoilStats {
@@ -437,10 +439,12 @@ function EquipmentController({
     
     let terrainChanged = false;
     
-    // Terrain softness at vehicle position (affects traction)
-    const getTerrainSoftness = (veh: { posX: number; posZ: number }) => {
+    // Soil terramechanics + softness at vehicle position
+    const getSoilContext = (veh: { posX: number; posZ: number }) => {
       const mat = getMaterialAt(veh.posX, 0, veh.posZ);
-      return mat.moisture * 0.6 + (1 - mat.frictionAngle / (45 * 0.0174533)) * 0.4;
+      const softness = mat.moisture * 0.6 + (1 - mat.frictionAngle / (45 * 0.0174533)) * 0.4;
+      const params = getTerramechParams(mat.frictionAngle, mat.cohesion, mat.moisture);
+      return { softness, params };
     };
     
     if (es.activeEquipment === 'excavator') {
