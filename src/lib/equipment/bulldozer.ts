@@ -75,16 +75,14 @@ export function updateBulldozer(
   state.vehicle.tracks.rightSpeed = inputs.rightTrack;
 
   if (hydraulics) {
-    // Blade lift
+    // Blade lift: cylinder velocity directly drives blade height (1:1 scale)
     stepCylinder(
       state.cylinders.bladeLift,
       inputs.bladeUp,
       bladeLiftLoad(state, inputs.bladeUp),
       hydraulics.pressure, hydraulics.flowRate, dt,
     );
-    state.bladeHeight += (state.cylinders.bladeLift.velocity / BLADE_LIFT_MOMENT) * dt * BLADE_LIFT_MOMENT;
-    // (Cylinder velocity is in cyl-units; we approximate 1:1 to blade height)
-    state.bladeHeight += inputs.bladeUp * 0; // no-op (kept for clarity)
+    state.bladeHeight += state.cylinders.bladeLift.velocity * dt * 0.15;
 
     // Tilt
     stepCylinder(
