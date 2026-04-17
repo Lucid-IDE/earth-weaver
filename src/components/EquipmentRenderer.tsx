@@ -142,11 +142,15 @@ function PinJoint({ pos, radius = 0.006 }: { pos: [number, number, number]; radi
 }
 
 // ── Track Assembly ──────────────────────────────────────────────────
-// Realistic tracked undercarriage with sprocket, idler, rollers, track pads
+// Realistic tracked undercarriage with sprocket, idler, rollers, track pads.
+// Pads SCROLL based on track travel (real linear distance, not frame count)
+// and exhibit SLACK sag when slipping (slack 0..1).
 function TrackAssembly({
   side, // -1 = left, 1 = right
   trackWidth, trackLength, trackHeight,
   numRollers = 6, numPads = 14,
+  travel = 0,
+  slack = 0,
 }: {
   side: number;
   trackWidth: number;
@@ -154,8 +158,17 @@ function TrackAssembly({
   trackHeight: number;
   numRollers?: number;
   numPads?: number;
+  travel?: number;
+  slack?: number;
 }) {
   const xOff = side * trackWidth / 2;
+  // Convert linear travel (world u) into a phase along the track perimeter.
+  // Loop length ≈ 2 × trackLength (top + bottom runs). Pads roll continuously.
+  const loopLen = trackLength * 1.9;
+  const padPhase = ((travel % loopLen) + loopLen) % loopLen;
+  const padPitchBottom = (trackLength * 0.9) / numPads;
+  // Slack sag: bottom run pads droop slightly between rollers.
+  const sag = slack * 0.004;
   const padWidth = 0.024;
   const frameWidth = 0.008;
   const rollerRadius = trackHeight * 0.35;
@@ -218,13 +231,16 @@ function TrackAssembly({
         <meshStandardMaterial color={COLORS.medSteel} metalness={0.6} roughness={0.5} />
       </mesh>
 
-      {/* Track pads (bottom) */}
+      {/* Track pads (bottom) — scroll along Z by phase */}
       {Array.from({ length: numPads }).map((_, i) => {
-        const z = -trackLength * 0.45 + (i / (numPads - 1)) * trackLength * 0.9;
+        const baseZ = -trackLength * 0.45 + (i / (numPads - 1)) * trackLength * 0.9;
+        const offsetZ = ((baseZ + padPhase) % loopLen + loopLen) % loopLen - loopLen * 0.5;
+        const midProx = 1 - Math.abs(offsetZ / (trackLength * 0.45));
+        const ySag = -sag * Math.max(0, midProx);
         return (
           <BoxAt key={`bp${i}`}
-            pos={[xOff, -trackHeight * 0.88, z]}
-            size={[padWidth, 0.003, trackLength / numPads * 0.85]}
+            pos={[xOff, -trackHeight * 0.88 + ySag, offsetZ]}
+            size={[padWidth, 0.003, padPitchBottom * 0.85]}
             color={COLORS.rubber}
             metalness={0.2}
             roughness={0.9}
@@ -232,14 +248,17 @@ function TrackAssembly({
         );
       })}
 
-      {/* Track pads (top) */}
+      {/* Track pads (top) — scroll opposite direction */}
       {Array.from({ length: Math.floor(numPads * 0.6) }).map((_, i) => {
         const cnt = Math.floor(numPads * 0.6);
-        const z = -trackLength * 0.3 + (i / (cnt - 1)) * trackLength * 0.6;
+        const baseZ = -trackLength * 0.3 + (i / (cnt - 1)) * trackLength * 0.6;
+        const offsetZ = ((baseZ - padPhase) % loopLen + loopLen) % loopLen - loopLen * 0.5;
+        const midProx = 1 - Math.abs(offsetZ / (trackLength * 0.3));
+        const ySag = sag * 0.6 * Math.max(0, midProx);
         return (
           <BoxAt key={`tp${i}`}
-            pos={[xOff, trackHeight * 0.12, z]}
-            size={[padWidth, 0.003, trackLength / numPads * 0.85]}
+            pos={[xOff, trackHeight * 0.12 + ySag, offsetZ]}
+            size={[padWidth, 0.003, padPitchBottom * 0.85]}
             color={COLORS.rubber}
             metalness={0.2}
             roughness={0.9}
@@ -394,8 +413,10 @@ export function ExcavatorMesh({ state }: { state: ExcavatorState }) {
   return (
     <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
       {/* ── Undercarriage ── */}
-      <TrackAssembly side={-1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={5} numPads={12} />
-      <TrackAssembly side={1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={5} numPads={12} />
+      <TrackAssembly side={-1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={5} numPads={12}
+        travel={v.tracks.leftTravel} slack={v.tracks.slack} />
+      <TrackAssembly side={1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={5} numPads={12}
+        travel={v.tracks.rightTravel} slack={v.tracks.slack} />
 
       {/* Track frame cross-members */}
       <BoxAt pos={[0, -th * 0.3, -tl * 0.25]} size={[tw * 0.6, 0.006, 0.008]} color={COLORS.darkSteel} metalness={0.6} roughness={0.5} />
@@ -573,8 +594,10 @@ export function BulldozerMesh({ state }: { state: BulldozerState }) {
   return (
     <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
       {/* ── Undercarriage ── */}
-      <TrackAssembly side={-1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={7} numPads={16} />
-      <TrackAssembly side={1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={7} numPads={16} />
+      <TrackAssembly side={-1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={7} numPads={16}
+        travel={v.tracks.leftTravel} slack={v.tracks.slack} />
+      <TrackAssembly side={1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={7} numPads={16}
+        travel={v.tracks.rightTravel} slack={v.tracks.slack} />
 
       {/* Track frame cross-members */}
       <BoxAt pos={[0, -th * 0.3, -tl * 0.3]} size={[tw * 0.5, 0.008, 0.01]} color={COLORS.darkSteel} />
