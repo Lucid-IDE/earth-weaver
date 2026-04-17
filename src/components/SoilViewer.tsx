@@ -546,6 +546,10 @@ function EquipmentController({
       }
     }
 
+    // Overlay rigid-body dynamic pitch on top of terrain-following pitch
+    es.excavator.vehicle.pitch += es.excPhysics.rigidBody.pitchAccum;
+    es.bulldozer.vehicle.pitch += es.dozPhysics.rigidBody.pitchAccum;
+
     if (es.activeEquipment === 'none') {
       updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
         trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
