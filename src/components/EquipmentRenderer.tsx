@@ -231,13 +231,16 @@ function TrackAssembly({
         <meshStandardMaterial color={COLORS.medSteel} metalness={0.6} roughness={0.5} />
       </mesh>
 
-      {/* Track pads (bottom) */}
+      {/* Track pads (bottom) — scroll along Z by phase */}
       {Array.from({ length: numPads }).map((_, i) => {
-        const z = -trackLength * 0.45 + (i / (numPads - 1)) * trackLength * 0.9;
+        const baseZ = -trackLength * 0.45 + (i / (numPads - 1)) * trackLength * 0.9;
+        const offsetZ = ((baseZ + padPhase) % loopLen + loopLen) % loopLen - loopLen * 0.5;
+        const midProx = 1 - Math.abs(offsetZ / (trackLength * 0.45));
+        const ySag = -sag * Math.max(0, midProx);
         return (
           <BoxAt key={`bp${i}`}
-            pos={[xOff, -trackHeight * 0.88, z]}
-            size={[padWidth, 0.003, trackLength / numPads * 0.85]}
+            pos={[xOff, -trackHeight * 0.88 + ySag, offsetZ]}
+            size={[padWidth, 0.003, padPitchBottom * 0.85]}
             color={COLORS.rubber}
             metalness={0.2}
             roughness={0.9}
@@ -245,14 +248,17 @@ function TrackAssembly({
         );
       })}
 
-      {/* Track pads (top) */}
+      {/* Track pads (top) — scroll opposite direction */}
       {Array.from({ length: Math.floor(numPads * 0.6) }).map((_, i) => {
         const cnt = Math.floor(numPads * 0.6);
-        const z = -trackLength * 0.3 + (i / (cnt - 1)) * trackLength * 0.6;
+        const baseZ = -trackLength * 0.3 + (i / (cnt - 1)) * trackLength * 0.6;
+        const offsetZ = ((baseZ - padPhase) % loopLen + loopLen) % loopLen - loopLen * 0.5;
+        const midProx = 1 - Math.abs(offsetZ / (trackLength * 0.3));
+        const ySag = sag * 0.6 * Math.max(0, midProx);
         return (
           <BoxAt key={`tp${i}`}
-            pos={[xOff, trackHeight * 0.12, z]}
-            size={[padWidth, 0.003, trackLength / numPads * 0.85]}
+            pos={[xOff, trackHeight * 0.12 + ySag, offsetZ]}
+            size={[padWidth, 0.003, padPitchBottom * 0.85]}
             color={COLORS.rubber}
             metalness={0.2}
             roughness={0.9}
