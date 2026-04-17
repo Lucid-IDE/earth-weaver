@@ -413,8 +413,10 @@ export function ExcavatorMesh({ state }: { state: ExcavatorState }) {
   return (
     <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
       {/* ── Undercarriage ── */}
-      <TrackAssembly side={-1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={5} numPads={12} />
-      <TrackAssembly side={1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={5} numPads={12} />
+      <TrackAssembly side={-1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={5} numPads={12}
+        travel={v.tracks.leftTravel} slack={v.tracks.slack} />
+      <TrackAssembly side={1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={5} numPads={12}
+        travel={v.tracks.rightTravel} slack={v.tracks.slack} />
 
       {/* Track frame cross-members */}
       <BoxAt pos={[0, -th * 0.3, -tl * 0.25]} size={[tw * 0.6, 0.006, 0.008]} color={COLORS.darkSteel} metalness={0.6} roughness={0.5} />
@@ -592,8 +594,10 @@ export function BulldozerMesh({ state }: { state: BulldozerState }) {
   return (
     <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
       {/* ── Undercarriage ── */}
-      <TrackAssembly side={-1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={7} numPads={16} />
-      <TrackAssembly side={1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={7} numPads={16} />
+      <TrackAssembly side={-1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={7} numPads={16}
+        travel={v.tracks.leftTravel} slack={v.tracks.slack} />
+      <TrackAssembly side={1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={7} numPads={16}
+        travel={v.tracks.rightTravel} slack={v.tracks.slack} />
 
       {/* Track frame cross-members */}
       <BoxAt pos={[0, -th * 0.3, -tl * 0.3]} size={[tw * 0.5, 0.008, 0.01]} color={COLORS.darkSteel} />
