@@ -449,88 +449,100 @@ function EquipmentController({
     
     if (es.activeEquipment === 'excavator') {
       const inputs = getExcavatorInputs(ctrl);
-      
-      // Compute hydraulic demand from arm inputs
+
       const armDemand = Math.min(1,
         Math.abs(inputs.boomInput) * 0.4 +
         Math.abs(inputs.stickInput) * 0.3 +
         Math.abs(inputs.bucketInput) * 0.2 +
         Math.abs(inputs.swingInput) * 0.15
       );
-      
-      // Physics-driven movement (engine → torque converter → tracks)
+
+      const excCtx = getSoilContext(es.excavator.vehicle);
       updateVehiclePhysics(
         es.excPhysics, es.excavator.vehicle,
         inputs.leftTrack, inputs.rightTrack,
         armDemand,
-        getTerrainSoftness(es.excavator.vehicle),
+        excCtx.softness,
         clampedDt,
+        excCtx.params,
       );
-      
-      // Hydraulic-limited arm actuation
+
       updateExcavator(es.excavator, clampedDt, inputs, es.excPhysics.hydraulics);
-      
-      // Terrain following (Y position + pitch)
+
       updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
         trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
         loadFactor: 0.95 + es.excavator.bucketFill * 0.3,
         followSharpness: 0.55, maxDropSpeed: 0.6,
       });
-      
-      // Inactive dozer follows terrain passively
+
       updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
         trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
         loadFactor: 1.2, allowTrackMarks: false,
       });
-      
-      // Dig/scoop/drop
+
+      // Dig/scoop/drop with chassis force feedback
       const armActive = Math.abs(inputs.boomInput) + Math.abs(inputs.stickInput) + Math.abs(inputs.bucketInput) > 0.01;
       if (armActive || es.excavator.bucketFill > 0.01) {
-        const didDig = excavatorDig(es.excavator, field, sim, {
+        const dig = excavatorDig(es.excavator, field, sim, {
           bucketInput: inputs.bucketInput, dt: clampedDt,
         });
-        if (didDig) terrainChanged = true;
+        if (dig.changed) terrainChanged = true;
+        if (dig.reactionForce > 0) {
+          // Bucket pushes back on cab → forward pitch (nose dips)
+          // Magnitude proportional to arm extension (longer lever = more torque)
+          const fk = computeExcavatorFK(es.excavator);
+          const lever = Math.hypot(fk.bucketTip[0] - es.excavator.vehicle.posX,
+                                   fk.bucketTip[2] - es.excavator.vehicle.posZ);
+          applyChassisTorque(es.excPhysics.rigidBody, dig.reactionForce * lever * 0.8);
+        }
+        // Heavy bucket lift: extra rear-down torque from boom up command
+        if (inputs.boomInput > 0 && es.excavator.bucketFill > 0.05) {
+          applyChassisTorque(es.excPhysics.rigidBody,
+            -inputs.boomInput * es.excavator.bucketFill * 1.6);
+        }
       }
     }
-    
+
     if (es.activeEquipment === 'bulldozer') {
       const inputs = getBulldozerInputs(ctrl);
-      
-      // Hydraulic demand from blade controls
+
       const bladeDemand = Math.min(1,
         Math.abs(inputs.bladeUp) * 0.5 +
         Math.abs(inputs.bladeTiltInput) * 0.2 +
         Math.abs(inputs.bladeAngleInput) * 0.15
       );
-      
-      // Physics-driven movement
+
+      const dozCtx = getSoilContext(es.bulldozer.vehicle);
       updateVehiclePhysics(
         es.dozPhysics, es.bulldozer.vehicle,
         inputs.leftTrack, inputs.rightTrack,
         bladeDemand,
-        getTerrainSoftness(es.bulldozer.vehicle),
+        dozCtx.softness,
         clampedDt,
+        dozCtx.params,
       );
-      
-      // Hydraulic-limited blade control
+
       updateBulldozer(es.bulldozer, clampedDt, inputs, es.dozPhysics.hydraulics);
-      
+
       updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
         trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
         loadFactor: 1.2, followSharpness: 0.50, maxDropSpeed: 0.5,
       });
-      
+
       updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
         trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
         loadFactor: 0.95, allowTrackMarks: false,
       });
-      
-      // Blade pushing (uses actual physics velocity, not input)
+
       const isMoving = Math.abs(es.dozPhysics.forwardVelocity) > 0.002;
       const bladeEngaged = es.bulldozer.bladeHeight < 0.03;
       if (isMoving && bladeEngaged) {
-        const didPush = bulldozerPush(es.bulldozer, field, sim);
-        if (didPush) terrainChanged = true;
+        const push = bulldozerPush(es.bulldozer, field, sim);
+        if (push.changed) terrainChanged = true;
+        if (push.reactionForce > 0) {
+          // Blade pushes back → nose-up pitch (rear digs in)
+          applyChassisTorque(es.dozPhysics.rigidBody, -push.reactionForce * 0.6);
+        }
       }
     }
 
