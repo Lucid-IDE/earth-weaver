@@ -324,8 +324,18 @@ function particleToGrid(state: MPMSolverState, dt: number) {
       FmR[6]*Fproj[6]+FmR[7]*Fproj[7]+FmR[8]*Fproj[8],
     ];
 
-    // Kirchhoff stress: τ = 2μ(F-R)Fᵀ + λJ(J-1)I
-    const volTerm = lam * J * (J - 1);
+    // ── Two-phase: Terzaghi effective stress ──
+    // Pore pressure relaxes the volumetric (mean) stress that the soil
+    // skeleton actually carries. σ_effective = σ_total − p_water · I.
+    // We model pore pressure as proportional to moisture × compressive J.
+    const m = state.moisture[p];
+    // Only compressive states (J < 1) and moist particles develop excess pore pressure.
+    const compress = Math.max(0, 1 - J);
+    // Pressure scales with moisture squared (drainage at low moisture).
+    const porePressure = m * m * compress * lam * 0.55;
+
+    // Kirchhoff stress: τ = 2μ(F-R)Fᵀ + λJ(J-1)I − p_water · I
+    const volTerm = lam * J * (J - 1) - porePressure;
     const tau = [
       2 * mu * FmRFt[0] + volTerm,
       2 * mu * FmRFt[1],
@@ -542,6 +552,11 @@ function gridToParticle(state: MPMSolverState, dt: number) {
     state.vx[p] = newVx;
     state.vy[p] = newVy;
     state.vz[p] = newVz;
+
+    // ── Pore-pressure drainage (Darcy-like): moisture slowly evaporates ──
+    if (state.moisture[p] > 0) {
+      state.moisture[p] = Math.max(0, state.moisture[p] - 0.012 * dt);
+    }
 
     // Update deformation gradient: F = (I + dt * C) * F_old
     const fOff = p * 9;

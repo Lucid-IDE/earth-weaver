@@ -7,6 +7,12 @@
 //   Bulldozer: CAT D6 class (20-ton, ~150kW diesel)
 
 import { VehicleState } from './types';
+import {
+  computeTrackForces,
+  getTerramechParams,
+  type SoilTerramechParams,
+} from './terramechanics';
+import { createRigidBody, integrateRigidBody, RigidBodyState } from './rigidBody';
 
 export const DEG = Math.PI / 180;
 
@@ -196,11 +202,20 @@ export interface VehiclePhysicsState {
   hydraulics: HydraulicSystem;
   drivetrain: DrivetrainState;
   mass: MassProperties;
-  
+  rigidBody: RigidBodyState;
+
+  // Per-track shear-deformation memory (Janosi)
+  leftShearJ: number;
+  rightShearJ: number;
+  // Latest per-track terramechanics readouts (for HUD / debug)
+  leftSinkage: number;
+  rightSinkage: number;
+  shearMobilization: number;
+
   // Derived motion state
   forwardVelocity: number;   // world units/s
   angularVelocity: number;   // rad/s (yaw)
-  
+
   // Ground interaction
   groundResistance: number;  // 0-1 current rolling resistance factor
   slopeResistance: number;   // additional from grade
@@ -218,6 +233,12 @@ export function createVehiclePhysics(
     hydraulics: createHydraulicSystem(),
     drivetrain: createDrivetrain(),
     mass,
+    rigidBody: createRigidBody(mass.mass),
+    leftShearJ: 0,
+    rightShearJ: 0,
+    leftSinkage: 0,
+    rightSinkage: 0,
+    shearMobilization: 0,
     forwardVelocity: 0,
     angularVelocity: 0,
     groundResistance: 0,
@@ -235,132 +256,135 @@ export function updateVehiclePhysics(
   hydraulicDemand: number, // 0-1
   terrainSoftness: number, // 0-1 from soil properties
   dt: number,
+  terramech?: SoilTerramechParams,
 ) {
   const dt_clamped = Math.min(dt, 0.033);
   const drv = physics.drivetrain;
   const eng = physics.engine;
   const mass = physics.mass;
-  
+
   // ── Interpret track inputs ──
-  // Inputs are like joystick levers: +1 = forward, -1 = reverse
   const avgInput = (leftInput + rightInput) * 0.5;
   const steerDiff = rightInput - leftInput;
-  
+
   drv.throttleInput = avgInput;
   drv.steerInput = steerDiff;
-  
+
   // Engine throttle from track demand
   const demandMagnitude = Math.max(Math.abs(leftInput), Math.abs(rightInput));
   eng.targetThrottle = Math.min(1, demandMagnitude + hydraulicDemand * 0.4);
-  
+
   // ── Engine update ──
   const totalLoad = Math.abs(physics.forwardVelocity) * mass.mass * 10 + physics.hydraulics.pumpLoad;
   updateEngine(eng, totalLoad, dt_clamped);
-  
+
   // ── Hydraulic system ──
   updateHydraulicSystem(physics.hydraulics, eng, hydraulicDemand, dt_clamped);
-  
+
   // ── Torque converter ──
-  // Slip ratio: high at low speed (stall), low at cruise
   const speedRatio = Math.min(1, Math.abs(physics.forwardVelocity) * 40);
   drv.converterSlip = Math.max(0.05, 1 - speedRatio * 0.85);
-  // Torque multiplication at stall (up to 2.5x)
   const torqueMultiplier = 1 + (1 - speedRatio) * 1.5;
   drv.converterOutputTorque = eng.torque * torqueMultiplier * (1 - drv.converterSlip * 0.3);
-  
+
   // ── Differential steering ──
-  // Split torque to tracks based on steering input
   const baseTorque = drv.converterOutputTorque;
   const steerFactor = drv.steerInput * 0.5;
-  
   drv.leftDriveTorque = baseTorque * (avgInput - steerFactor) * 0.5;
   drv.rightDriveTorque = baseTorque * (avgInput + steerFactor) * 0.5;
-  
-  // Braking: when input opposes current velocity, or explicit counter-steer
+
+  // Braking
   drv.leftBrake = 0;
   drv.rightBrake = 0;
   if (leftInput * drv.leftTrackVelocity < -0.001) drv.leftBrake = 0.7;
   if (rightInput * drv.rightTrackVelocity < -0.001) drv.rightBrake = 0.7;
-  // Zero input = service brake (gradual stop)
   if (Math.abs(leftInput) < 0.05) drv.leftBrake = 0.3;
   if (Math.abs(rightInput) < 0.05) drv.rightBrake = 0.3;
-  
-  // ── Ground resistance ──
-  const baseResistance = mass.rollingResistance * (1 + terrainSoftness * 2.5);
-  physics.groundResistance = baseResistance;
-  physics.slopeResistance = Math.sin(vehicle.pitch) * mass.mass * 0.15;
-  
-  // ── Track velocity integration ──
-  const resistForce = (physics.groundResistance + Math.abs(physics.slopeResistance)) * mass.mass;
-  
-  // Left track
-  {
-    const netForce = drv.leftDriveTorque - 
-      Math.sign(drv.leftTrackVelocity) * resistForce * 0.5 -
-      drv.leftBrake * Math.sign(drv.leftTrackVelocity) * mass.mass * 2;
-    const accel = netForce / (mass.mass * 0.5);
-    drv.leftTrackVelocity += accel * dt_clamped;
-    // Damping
-    drv.leftTrackVelocity *= (1 - 0.8 * dt_clamped);
-  }
-  
-  // Right track
-  {
-    const netForce = drv.rightDriveTorque -
-      Math.sign(drv.rightTrackVelocity) * resistForce * 0.5 -
-      drv.rightBrake * Math.sign(drv.rightTrackVelocity) * mass.mass * 2;
-    const accel = netForce / (mass.mass * 0.5);
-    drv.rightTrackVelocity += accel * dt_clamped;
-    drv.rightTrackVelocity *= (1 - 0.8 * dt_clamped);
-  }
-  
-  // Clamp max track speed (real machines: ~10 km/h ≈ 0.1 world units/s)
+
+  // ── Commanded track velocities (drivetrain output, before ground) ──
   const maxTrackSpeed = 0.12;
+  // Drive command in world u/s — simple gear ratio
+  const driveGain = 0.0009;
+  const cmdLeftV = drv.leftDriveTorque * driveGain - drv.leftBrake * Math.sign(drv.leftTrackVelocity) * 0.04;
+  const cmdRightV = drv.rightDriveTorque * driveGain - drv.rightBrake * Math.sign(drv.rightTrackVelocity) * 0.04;
+
+  // Ramp commanded velocities into "what the sprocket wants"
+  drv.leftTrackVelocity += (cmdLeftV - drv.leftTrackVelocity) * Math.min(1, 6 * dt_clamped);
+  drv.rightTrackVelocity += (cmdRightV - drv.rightTrackVelocity) * Math.min(1, 6 * dt_clamped);
   drv.leftTrackVelocity = Math.max(-maxTrackSpeed, Math.min(maxTrackSpeed, drv.leftTrackVelocity));
   drv.rightTrackVelocity = Math.max(-maxTrackSpeed, Math.min(maxTrackSpeed, drv.rightTrackVelocity));
-  
-  // ── Traction limit (slip) ──
-  const tractionCoeff = 0.6 * (1 - terrainSoftness * 0.5); // wet/soft = less traction
-  const maxTraction = tractionCoeff * mass.mass * 0.5;
-  
-  const leftForce = Math.abs(drv.leftDriveTorque);
-  const rightForce = Math.abs(drv.rightDriveTorque);
-  
-  if (leftForce > maxTraction || rightForce > maxTraction) {
-    physics.isSlipping = true;
-    physics.slipAmount = Math.min(1, Math.max(leftForce, rightForce) / maxTraction - 1);
-    // Reduce effective velocity when slipping
-    const slipReduction = 1 - physics.slipAmount * 0.6;
-    drv.leftTrackVelocity *= slipReduction;
-    drv.rightTrackVelocity *= slipReduction;
-  } else {
-    physics.isSlipping = false;
-    physics.slipAmount *= (1 - 5 * dt_clamped);
-  }
-  
-  // ── Vehicle motion from tracks ──
-  physics.forwardVelocity = (drv.leftTrackVelocity + drv.rightTrackVelocity) * 0.5;
+
+  // ── Bekker-Wong terramechanics per track ──
+  // Fall back to derived params if none supplied
+  const params = terramech ?? getTerramechParams(30 * DEG, 0.3, terrainSoftness);
+
+  // Per-track normal load = half vehicle weight (+ small weight transfer from pitch)
+  const pitchTransfer = Math.sin(physics.rigidBody.pitchAccum) * mass.mass * 0.15;
+  const halfWeight = mass.mass * 9.81 * 0.5; // gravity in scaled "kN"-ish
+  const leftLoad = halfWeight - pitchTransfer * 0.5;
+  const rightLoad = halfWeight - pitchTransfer * 0.5;
+  const shoeArea = mass.trackWidth * mass.trackLength;
+
+  const leftRes = computeTrackForces(
+    leftLoad, shoeArea, mass.trackWidth, mass.trackLength,
+    drv.leftTrackVelocity, physics.forwardVelocity,
+    dt_clamped, params, physics.leftShearJ,
+  );
+  const rightRes = computeTrackForces(
+    rightLoad, shoeArea, mass.trackWidth, mass.trackLength,
+    drv.rightTrackVelocity, physics.forwardVelocity,
+    dt_clamped, params, physics.rightShearJ,
+  );
+
+  physics.leftShearJ = leftRes.newShearJ;
+  physics.rightShearJ = rightRes.newShearJ;
+  physics.leftSinkage = leftRes.avgSinkage;
+  physics.rightSinkage = rightRes.avgSinkage;
+  physics.shearMobilization = (leftRes.shearMobilization + rightRes.shearMobilization) * 0.5;
+  physics.isSlipping = leftRes.saturated || rightRes.saturated;
+  physics.slipAmount = physics.isSlipping ? Math.min(1, physics.shearMobilization) : physics.slipAmount * (1 - 4 * dt_clamped);
+
+  // ── Chassis longitudinal dynamics ──
+  // Net thrust from both tracks minus motion resistance and slope
+  const totalThrust = leftRes.thrust + rightRes.thrust;
+  const totalResistance = leftRes.resistance + rightRes.resistance;
+  const slopeForce = -Math.sin(vehicle.pitch) * mass.mass * 9.81 * 0.6;
+  const dragForce = -physics.forwardVelocity * mass.mass * 0.6; // viscous + air
+
+  const netLongForce = totalThrust - Math.sign(physics.forwardVelocity) * totalResistance + slopeForce + dragForce;
+  const accel = netLongForce / Math.max(1, mass.mass * 60);
+  physics.forwardVelocity += accel * dt_clamped;
+
+  // Hard speed cap
+  const vMaxChassis = 0.10;
+  physics.forwardVelocity = Math.max(-vMaxChassis, Math.min(vMaxChassis, physics.forwardVelocity));
+
+  // ── Yaw from track differential ──
   const turnDiff = (drv.rightTrackVelocity - drv.leftTrackVelocity) / mass.trackWidth;
-  
-  // Angular velocity with inertia
-  const targetAngVel = turnDiff;
-  const angAccel = (targetAngVel - physics.angularVelocity) * mass.mass / physics.mass.momentOfInertia;
-  physics.angularVelocity += angAccel * dt_clamped * 0.3;
-  physics.angularVelocity *= (1 - 2 * dt_clamped); // angular damping
-  
+  const targetAngVel = turnDiff * 0.55;
+  const angAccel = (targetAngVel - physics.angularVelocity) * 8;
+  physics.angularVelocity += angAccel * dt_clamped;
+  physics.angularVelocity *= (1 - 2.4 * dt_clamped);
+
+  // ── Rigid body integration (pitch/roll/yaw kick) ──
+  const yawKick = integrateRigidBody(physics.rigidBody, physics.forwardVelocity, dt_clamped);
+
   // ── Apply to vehicle state ──
-  vehicle.heading += physics.angularVelocity * dt_clamped;
-  
+  vehicle.heading += physics.angularVelocity * dt_clamped + yawKick;
+
   const ch = Math.cos(vehicle.heading);
   const sh = Math.sin(vehicle.heading);
   vehicle.posX += sh * physics.forwardVelocity * dt_clamped;
   vehicle.posZ += ch * physics.forwardVelocity * dt_clamped;
-  
+
   // World bounds
   vehicle.posX = Math.max(-0.7, Math.min(0.7, vehicle.posX));
   vehicle.posZ = Math.max(-0.7, Math.min(0.7, vehicle.posZ));
-  
-  // Update track state for renderer/terrain
+
+  // Bookkeeping
+  physics.groundResistance = totalResistance / Math.max(1, mass.mass);
+  physics.slopeResistance = Math.abs(slopeForce);
+
   vehicle.tracks.leftSpeed = drv.leftTrackVelocity / maxTrackSpeed;
   vehicle.tracks.rightSpeed = drv.rightTrackVelocity / maxTrackSpeed;
   vehicle.speed = physics.forwardVelocity;
