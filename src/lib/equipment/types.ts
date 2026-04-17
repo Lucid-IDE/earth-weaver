@@ -1,5 +1,7 @@
 // ── Equipment Type Definitions ───────────────────────────────────────
 
+import type { CylinderState } from './hydraulicCylinder';
+
 export interface JointState {
   angle: number;       // current angle in radians
   minAngle: number;    // joint limits
@@ -10,8 +12,13 @@ export interface JointState {
 }
 
 export interface TrackState {
-  leftSpeed: number;   // -1 to 1
+  leftSpeed: number;   // -1 to 1 (normalized)
   rightSpeed: number;  // -1 to 1
+  /** accumulated linear travel of track shoes (world u). Drives pad scroll. */
+  leftTravel: number;
+  rightTravel: number;
+  /** 0..1 slip mobilization → drives slack/squeak. */
+  slack: number;
 }
 
 export interface VehicleState {
@@ -27,6 +34,22 @@ export interface VehicleState {
   turnRate: number;    // derived turn rate
 }
 
+/** Per-joint hydraulic cylinder set for excavator. */
+export interface ExcavatorCylinders {
+  boom: CylinderState;
+  stick: CylinderState;
+  bucket: CylinderState;
+  swing: CylinderState; // proxy: swing motor modeled as a cylinder for unified API
+}
+
+/** Per-actuator hydraulics for bulldozer. */
+export interface BulldozerCylinders {
+  bladeLift: CylinderState;
+  bladeTilt: CylinderState;
+  bladeAngle: CylinderState;
+  ripper: CylinderState;
+}
+
 export interface ExcavatorState {
   vehicle: VehicleState;
   swing: JointState;      // cab rotation (turntable)
@@ -34,7 +57,8 @@ export interface ExcavatorState {
   stick: JointState;      // secondary arm
   bucket: JointState;     // bucket curl
   bucketFill: number;     // 0-1 captured soil load for scoop/drop behavior
-  hydraulicPressure: number; // 0-1 visual feedback
+  hydraulicPressure: number; // 0-1 visual feedback (system-level)
+  cylinders: ExcavatorCylinders;
 }
 
 export interface BulldozerState {
@@ -46,6 +70,8 @@ export interface BulldozerState {
   bladeMinHeight: number;
   bladeMaxHeight: number;
   rippersDown: boolean;
+  hydraulicPressure: number; // 0-1
+  cylinders: BulldozerCylinders;
 }
 
 export type EquipmentType = 'excavator' | 'bulldozer' | 'none';

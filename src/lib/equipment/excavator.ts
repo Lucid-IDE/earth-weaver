@@ -1,20 +1,38 @@
 // ── Excavator Model & Physics ────────────────────────────────────────
-// Articulated hydraulic excavator with boom/stick/bucket + cab swing
-// Forward kinematics computes bucket tip position for SDF interaction
-// Also provides local-space FK for renderer (avoids double-transform issues)
-//
-// Proportions reference: CAT 320 / Komatsu PC200 class (20-ton)
-// Scaled to world units where 1.0 ≈ 2m
+// Articulated hydraulic excavator with boom/stick/bucket + cab swing.
+// Joints are now driven by individual hydraulic cylinders modeled as
+// force-producing elements (CylinderState). Each tick, the cylinder is
+// stepped given current pump pressure/flow and the load it sees from
+// gravity + arm geometry + bucket contents; the resulting cylinder
+// velocity converts to angular joint velocity via a per-joint moment
+// arm. This gives realistic lag, pressure-dependent speed, and saturated
+// motion when the engine is lugging or the relief valve cracks.
 
-import { ExcavatorState, DEG } from './types';
-import { hydraulicActuatorSpeed, HydraulicSystem } from './vehiclePhysics';
+import { ExcavatorState, ExcavatorCylinders, DEG } from './types';
+import { HydraulicSystem } from './vehiclePhysics';
+import { createCylinder, stepCylinder } from './hydraulicCylinder';
 
 // ── Realistic joint limits (based on real excavator specs) ──────────
-const BOOM_LENGTH = 0.22;   // ~4.4m real
-const STICK_LENGTH = 0.16;  // ~3.2m real
-const BUCKET_LENGTH = 0.07; // ~1.4m real (to teeth tip)
-const CAB_HEIGHT = 0.06;    // ~1.2m cab pivot height above tracks
-const PIVOT_OFFSET = 0.045; // boom pivot forward of cab center
+const BOOM_LENGTH = 0.22;
+const STICK_LENGTH = 0.16;
+const BUCKET_LENGTH = 0.07;
+const CAB_HEIGHT = 0.06;
+const PIVOT_OFFSET = 0.045;
+
+// Effective moment arms (cylinder linear → joint angular)
+const BOOM_MOMENT = 0.06;
+const STICK_MOMENT = 0.05;
+const BUCKET_MOMENT = 0.035;
+const SWING_MOMENT = 0.10;
+
+function makeCylinders(): ExcavatorCylinders {
+  return {
+    boom: createCylinder({ boreArea: 0.014, rodArea: 0.0035, maxStroke: 1.5, reliefPressure: 350 }),
+    stick: createCylinder({ boreArea: 0.011, rodArea: 0.003, maxStroke: 1.4, reliefPressure: 350 }),
+    bucket: createCylinder({ boreArea: 0.009, rodArea: 0.0024, maxStroke: 1.2, reliefPressure: 350 }),
+    swing: createCylinder({ boreArea: 0.008, rodArea: 0.002, maxStroke: 2.0, reliefPressure: 280 }),
+  };
+}
 
 export function createExcavatorState(): ExcavatorState {
   return {
@@ -24,7 +42,7 @@ export function createExcavatorState(): ExcavatorState {
       pitch: 0,
       contactSink: 0,
       groundClearance: 0,
-      tracks: { leftSpeed: 0, rightSpeed: 0 },
+      tracks: { leftSpeed: 0, rightSpeed: 0, leftTravel: 0, rightTravel: 0, slack: 0 },
       speed: 0,
       turnRate: 0,
     },
@@ -46,6 +64,7 @@ export function createExcavatorState(): ExcavatorState {
     },
     bucketFill: 0,
     hydraulicPressure: 0,
+    cylinders: makeCylinders(),
   };
 }
 
@@ -53,31 +72,82 @@ function clampJoint(joint: { angle: number; minAngle: number; maxAngle: number }
   joint.angle = Math.max(joint.minAngle, Math.min(joint.maxAngle, joint.angle));
 }
 
-// Compute load factor for a joint based on arm geometry and bucket fill
-function computeArmLoad(state: ExcavatorState, joint: string): number {
-  const armWeight = 0.3; // base arm weight factor
-  const bucketLoad = 0.2 + state.bucketFill * 0.8; // heavier when loaded
-  
+/**
+ * Per-joint load model.
+ * Returns the external load (N, scaled) opposing cylinder extension
+ * for a given joint, in the same scaled units as cylinder force.
+ *
+ * Includes:
+ *  - Gravitational moment of arm + bucket
+ *  - Bucket contents (heavier when filled)
+ *  - Geometry (worse leverage when arm extended horizontally)
+ */
+function computeJointLoad(state: ExcavatorState, joint: keyof ExcavatorCylinders): number {
+  const armWeight = 8;     // scaled N for empty arm segment
+  const bucketEmpty = 5;
+  const bucketLoad = bucketEmpty + state.bucketFill * 28;
+
   switch (joint) {
-    case 'boom':
-      // Boom bears the weight of stick + bucket + load
-      // Heavier when arm is extended horizontally
-      return armWeight + bucketLoad + Math.abs(Math.cos(state.boom.angle)) * 0.3;
-    case 'stick':
-      return armWeight * 0.6 + bucketLoad;
-    case 'bucket':
-      return bucketLoad * 0.5;
-    case 'swing':
-      // Swing inertia increases with arm extension
-      return 0.2 + Math.abs(Math.cos(state.boom.angle)) * 0.3;
+    case 'boom': {
+      // Boom holds stick + bucket + load. Worst at horizontal.
+      const horiz = Math.abs(Math.cos(state.boom.angle));
+      return (armWeight * 1.5 + bucketLoad) * (0.6 + horiz * 1.0);
+    }
+    case 'stick': {
+      const stickAbs = state.boom.angle + state.stick.angle;
+      const horiz = Math.abs(Math.cos(stickAbs));
+      return (armWeight + bucketLoad) * (0.5 + horiz * 0.8);
+    }
+    case 'bucket': {
+      // Curl moment ∝ load × length to bucket CG
+      return (bucketLoad) * 0.55;
+    }
+    case 'swing': {
+      // Swing moment of inertia ∝ extended arm
+      const extension = Math.abs(Math.cos(state.boom.angle)) * BOOM_LENGTH +
+                        Math.abs(Math.cos(state.boom.angle + state.stick.angle)) * STICK_LENGTH;
+      return (5 + bucketLoad * 0.3) * (1 + extension * 6);
+    }
     default:
-      return 0.5;
+      return 5;
   }
 }
 
 /**
- * Update excavator joints using hydraulic system for realistic speed limiting.
- * When hydraulics is null, falls back to base speed (for backward compat).
+ * Drive a joint using the hydraulic cylinder. Returns realized angular
+ * velocity (rad/s).
+ *
+ * cmd: -1..1 (mapped to cylinder retract/extend)
+ * gravityAssist: when commanding the gravity-favoured direction the
+ *   load helps rather than opposes (e.g. boom down).
+ */
+function driveJoint(
+  state: ExcavatorState,
+  jointKey: keyof ExcavatorCylinders,
+  cmd: number,
+  hyd: HydraulicSystem,
+  dt: number,
+  jointSign: number = 1, // some cylinders extend = positive joint angle change
+): number {
+  const cyl = state.cylinders[jointKey];
+  const baseLoad = computeJointLoad(state, jointKey);
+  // Gravity-assisted direction (e.g. boom going down, bucket dumping):
+  // command sign opposite to load → load is helpful, halve effective load
+  const effectiveLoad = (cmd * jointSign < 0) ? baseLoad * 0.4 : baseLoad;
+
+  stepCylinder(cyl, cmd, effectiveLoad, hyd.pressure, hyd.flowRate, dt);
+
+  // Convert linear cyl velocity → angular joint rate via moment arm
+  const moment =
+    jointKey === 'boom' ? BOOM_MOMENT :
+    jointKey === 'stick' ? STICK_MOMENT :
+    jointKey === 'bucket' ? BUCKET_MOMENT : SWING_MOMENT;
+  return (cyl.velocity / moment) * jointSign;
+}
+
+/**
+ * Update excavator joints using per-cylinder force/flow dynamics.
+ * Falls back to simple kinematic mode when hydraulics is null.
  */
 export function updateExcavator(
   state: ExcavatorState,
@@ -92,22 +162,17 @@ export function updateExcavator(
   },
   hydraulics?: HydraulicSystem | null,
 ) {
-  // Update joints with hydraulic-limited speeds
   if (hydraulics) {
-    const swingLoad = computeArmLoad(state, 'swing');
-    const boomLoad = computeArmLoad(state, 'boom');
-    const stickLoad = computeArmLoad(state, 'stick');
-    const bucketLoad = computeArmLoad(state, 'bucket');
-    
-    // Boom down is gravity-assisted (faster), boom up fights gravity
-    const boomGravityFactor = inputs.boomInput > 0 ? 1.0 : 1.4; // down is easier
-    
-    state.swing.angle += inputs.swingInput * hydraulicActuatorSpeed(hydraulics, state.swing.speed, swingLoad) * dt;
-    state.boom.angle += inputs.boomInput * hydraulicActuatorSpeed(hydraulics, state.boom.speed, boomLoad) * boomGravityFactor * dt;
-    state.stick.angle += inputs.stickInput * hydraulicActuatorSpeed(hydraulics, state.stick.speed, stickLoad) * dt;
-    state.bucket.angle += inputs.bucketInput * hydraulicActuatorSpeed(hydraulics, state.bucket.speed, bucketLoad) * dt;
+    const swingRate = driveJoint(state, 'swing', inputs.swingInput, hydraulics, dt, 1);
+    const boomRate = driveJoint(state, 'boom', inputs.boomInput, hydraulics, dt, 1);
+    const stickRate = driveJoint(state, 'stick', inputs.stickInput, hydraulics, dt, 1);
+    const bucketRate = driveJoint(state, 'bucket', inputs.bucketInput, hydraulics, dt, 1);
+
+    state.swing.angle += swingRate * dt;
+    state.boom.angle += boomRate * dt;
+    state.stick.angle += stickRate * dt;
+    state.bucket.angle += bucketRate * dt;
   } else {
-    // Legacy direct mode
     state.swing.angle += inputs.swingInput * state.swing.speed * dt;
     state.boom.angle += inputs.boomInput * state.boom.speed * dt;
     state.stick.angle += inputs.stickInput * state.stick.speed * dt;
@@ -119,12 +184,17 @@ export function updateExcavator(
   clampJoint(state.stick);
   clampJoint(state.bucket);
 
-  // Hydraulic pressure visual
-  const armActivity = Math.abs(inputs.boomInput) + Math.abs(inputs.stickInput) + Math.abs(inputs.bucketInput);
-  state.hydraulicPressure += (Math.min(1, armActivity) - state.hydraulicPressure) * 5 * dt;
+  // System pressure visual = max of any cylinder's pressure / max relief
+  const cyls = state.cylinders;
+  const peakP = Math.max(
+    cyls.boom.pressure / cyls.boom.spec.reliefPressure,
+    cyls.stick.pressure / cyls.stick.spec.reliefPressure,
+    cyls.bucket.pressure / cyls.bucket.spec.reliefPressure,
+    cyls.swing.pressure / cyls.swing.spec.reliefPressure,
+  );
+  state.hydraulicPressure += (peakP - state.hydraulicPressure) * Math.min(1, 8 * dt);
 
-  // NOTE: Track drive is now handled by vehiclePhysics.updateVehiclePhysics()
-  // We still store track speeds for the renderer but don't compute position here
+  // NOTE: Track drive is handled by vehiclePhysics.updateVehiclePhysics()
   state.vehicle.tracks.leftSpeed = inputs.leftTrack;
   state.vehicle.tracks.rightSpeed = inputs.rightTrack;
 }
@@ -180,7 +250,6 @@ export function computeExcavatorFK(state: ExcavatorState): ExcavatorFK {
     stickEnd[2] + cah * bucketHoriz,
   ];
 
-  // Bucket teeth
   const bucketDirHoriz = Math.cos(bucketAbsAngle);
   const ndx = sah * bucketDirHoriz;
   const ndy = Math.sin(bucketAbsAngle);
@@ -243,7 +312,6 @@ export function computeExcavatorLocalFK(state: ExcavatorState): ExcavatorLocalFK
   const bucketVert = Math.sin(bucketAbs) * BUCKET_LENGTH;
   const bucketTip: [number, number, number] = [0, stickEnd[1] + bucketVert, stickEnd[2] + bucketHoriz];
 
-  // Hydraulic attachment points
   const boomCylBase: [number, number, number] = [0, CAB_HEIGHT + 0.01, PIVOT_OFFSET - 0.01];
   const boomFrac = 0.30;
   const boomCylEnd: [number, number, number] = [
