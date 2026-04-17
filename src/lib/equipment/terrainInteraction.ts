@@ -428,6 +428,8 @@ function sampleSDF(field: VoxelField, wx: number, wy: number, wz: number): numbe
 }
 
 // ── Excavator bucket dig ────────────────────────────────────────────
+// Returns { changed, reactionForce } where reactionForce is the upward+backward
+// force the soil exerts on the bucket (used for chassis weight transfer).
 export function excavatorDig(
   state: ExcavatorState,
   field: VoxelField,
@@ -437,13 +439,14 @@ export function excavatorDig(
     bucketInput?: number;
     dt?: number;
   } = {},
-): boolean {
+): { changed: boolean; reactionForce: number } {
   const digRadius = options.digRadius ?? 0.03;
   const bucketInput = options.bucketInput ?? 0;
   const dt = options.dt ?? 1 / 60;
   const fk = computeExcavatorFK(state);
   let didChange = false;
   let cutMetric = 0;
+  let reactionForce = 0;
 
   for (const tooth of fk.bucketTeeth) {
     const terrainY = getTerrainHeight(field, tooth[0], tooth[2]);
@@ -452,7 +455,11 @@ export function excavatorDig(
     if (phi < 0 || penetration > 0.002) {
       const localRadius = digRadius * (1 + Math.min(0.8, Math.max(0, penetration) * 18));
       field.applyStamp(tooth[0], tooth[1] - 0.002, tooth[2], localRadius);
-      cutMetric += Math.max(0.002, penetration + 0.004);
+      const cut = Math.max(0.002, penetration + 0.004);
+      cutMetric += cut;
+      const mat = getMaterialAt(tooth[0], tooth[1] - 0.005, tooth[2]);
+      // Reaction force ∝ (cut depth) × (cohesion + density)
+      reactionForce += cut * (8 + mat.cohesion * 14 + mat.specificWeight * 6);
       didChange = true;
     }
   }
@@ -468,15 +475,49 @@ export function excavatorDig(
       fk.bucketTip[2],
       digRadius * 1.15,
     );
-    cutMetric += Math.max(0.003, tipPenetration + 0.005);
+    const cut = Math.max(0.003, tipPenetration + 0.005);
+    cutMetric += cut;
+    const mat = getMaterialAt(fk.bucketTip[0], fk.bucketTip[1] - 0.008, fk.bucketTip[2]);
+    reactionForce += cut * (10 + mat.cohesion * 18 + mat.specificWeight * 6);
     didChange = true;
   }
 
   if (cutMetric > 0) {
     const material = getMaterialAt(fk.bucketTip[0], fk.bucketTip[1] - 0.01, fk.bucketTip[2]);
-    const fillGain = Math.min(0.16, cutMetric * (2.2 + material.moisture * 1.2 + material.cohesion * 0.6));
+    // ── Volumetric scoop conservation ──
+    // Swept-volume estimate: cut depth × bucket cross-section × 1 frame
+    // Bucket capacity is normalized 0..1; gain scales with material density.
+    const bucketCrossSection = 0.014; // ≈ bucket mouth area in world units²
+    const sweptVolume = cutMetric * bucketCrossSection;
+    // Density factor: heavier soils fill faster (less air gaps)
+    const densityGain = 0.6 + material.specificWeight * 0.4;
+    // Cohesion bonus: clay sticks together → fills more efficiently
+    const fillGain = Math.min(0.18, sweptVolume * 320 * densityGain * (1 + material.cohesion * 0.5));
     if (bucketInput > -0.2) {
       state.bucketFill = clamp01(state.bucketFill + fillGain);
+    }
+  }
+
+  // ── Spillage at angles exceeding angle of repose ──
+  // Bucket "tilt" relative to horizontal. If the open mouth tips below repose,
+  // cohesionless material spills out.
+  if (state.bucketFill > 0.02) {
+    const bucketAbsAngle = state.boom.angle + state.stick.angle + state.bucket.angle;
+    // When bucketAbsAngle > 0 the mouth points up-ish (holds material).
+    // When < -repose, material spills over the lip.
+    const mat = getMaterialAt(fk.bucketTip[0], fk.bucketTip[1] - 0.01, fk.bucketTip[2]);
+    const repose = mat.frictionAngle * 0.85; // slightly less than friction angle
+    const spillAngle = -repose - 0.15; // grace zone
+    if (bucketAbsAngle < spillAngle) {
+      const overTilt = spillAngle - bucketAbsAngle;
+      // Cohesion holds material in (clay sticks); sand pours freely.
+      const spillRate = (1 - mat.cohesion * 0.85) * overTilt * dt * 1.2;
+      const spillAmount = Math.min(state.bucketFill, spillRate);
+      if (spillAmount > 0.0005) {
+        dumpBucketMaterial(state, field, sim, fk, spillAmount * 0.6);
+        state.bucketFill = Math.max(0, state.bucketFill - spillAmount);
+        didChange = true;
+      }
     }
   }
 
@@ -492,7 +533,7 @@ export function excavatorDig(
     sim.activate();
   }
 
-  return didChange;
+  return { changed: didChange, reactionForce };
 }
 
 function dumpBucketMaterial(
@@ -578,16 +619,18 @@ function dumpBucketMaterial(
 }
 
 // ── Bulldozer blade push ────────────────────────────────────────────
+// Returns reaction force pushing back on chassis (used for pitch torque).
 export function bulldozerPush(
   state: BulldozerState,
   field: VoxelField,
   sim: SoilSimulator,
-): boolean {
+): { changed: boolean; reactionForce: number } {
   const driveIntensity = clamp01((Math.abs(state.vehicle.tracks.leftSpeed) + Math.abs(state.vehicle.tracks.rightSpeed)) * 0.5);
-  if (driveIntensity < 0.08) return false;
+  if (driveIntensity < 0.08) return { changed: false, reactionForce: 0 };
 
   const blade = computeBladeGeometry(state);
   let didPush = false;
+  let reactionForce = 0;
 
   for (const point of blade.samplePoints) {
     const terrainY = getTerrainHeight(field, point[0], point[2]);
@@ -598,8 +641,12 @@ export function bulldozerPush(
       const cutRadius = 0.013 + Math.min(0.012, Math.max(0, penetration) * 0.5);
       field.applyStamp(point[0], point[1] - 0.002, point[2], cutRadius);
 
+      const pen = Math.max(0.001, penetration);
+      const mat = getMaterialAt(point[0], point[1] - 0.005, point[2]);
+      reactionForce += pen * (15 + mat.cohesion * 22 + mat.specificWeight * 8) * driveIntensity;
+
       // Deposit material in front of blade (berm buildup)
-      const pushDist = 0.026 + driveIntensity * 0.02 + Math.max(0, penetration) * 0.4;
+      const pushDist = 0.026 + driveIntensity * 0.02 + pen * 0.4;
       const depositX = point[0] + blade.bladeNormal[0] * pushDist;
       const depositY = terrainY + 0.006;
       const depositZ = point[2] + blade.bladeNormal[2] * pushDist;
@@ -622,5 +669,5 @@ export function bulldozerPush(
     sim.activate();
   }
 
-  return didPush;
+  return { changed: didPush, reactionForce };
 }
