@@ -610,6 +610,8 @@ export function ExcavatorMesh({
           <cylinderGeometry args={[0.005, 0.005, 0.003, 8]} />
           <meshStandardMaterial color={COLORS.exhaust} metalness={0.6} roughness={0.5} />
         </mesh>
+        {/* Exhaust smoke puffs (rises from cap) */}
+        <ExhaustSmoke origin={[0.022, 0.082, -0.035]} intensity={exhaustIntensity} />
 
         {/* Cab structure */}
         {/* Cab floor */}
