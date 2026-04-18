@@ -50,16 +50,18 @@ export function createExcavatorState(): ExcavatorState {
       angle: 0, minAngle: -180 * DEG, maxAngle: 180 * DEG,
       speed: 1.2, length: 0, label: 'Swing',
     },
+    // Spawn pose: boom raised, stick tucked, bucket curled — entire arm above
+    // track height so the machine drops cleanly without clipping the ground.
     boom: {
-      angle: -18 * DEG, minAngle: -65 * DEG, maxAngle: 72 * DEG,
+      angle: 32 * DEG, minAngle: -65 * DEG, maxAngle: 72 * DEG,
       speed: 0.8, length: BOOM_LENGTH, label: 'Boom',
     },
     stick: {
-      angle: -52 * DEG, minAngle: -135 * DEG, maxAngle: 35 * DEG,
+      angle: -95 * DEG, minAngle: -135 * DEG, maxAngle: 35 * DEG,
       speed: 1.0, length: STICK_LENGTH, label: 'Stick',
     },
     bucket: {
-      angle: -35 * DEG, minAngle: -145 * DEG, maxAngle: 55 * DEG,
+      angle: 30 * DEG, minAngle: -145 * DEG, maxAngle: 55 * DEG,
       speed: 1.5, length: BUCKET_LENGTH, label: 'Bucket',
     },
     bucketFill: 0,
