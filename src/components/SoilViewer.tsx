@@ -461,11 +461,11 @@ function EquipmentController({
     // ── Spawn-drop: gravity-fall vehicles before any terrain-follow runs ──
     const excFalling = stepSpawnDrop(
       es.excDrop, es.excavator.vehicle, es.excPhysics.rigidBody,
-      field, sim, 0.025, es.excPhysics.mass.mass, clampedDt,
+      field, sim, 0.014, es.excPhysics.mass.mass, clampedDt,
     );
     const dozFalling = stepSpawnDrop(
       es.dozDrop, es.bulldozer.vehicle, es.dozPhysics.rigidBody,
-      field, sim, 0.028, es.dozPhysics.mass.mass, clampedDt,
+      field, sim, 0.016, es.dozPhysics.mass.mass, clampedDt,
     );
     if (es.excDrop.landed && es.excDrop.landed) terrainChanged = true;
 
@@ -754,8 +754,8 @@ function SoilTerrain({
     initVehicleOnTerrain(es.bulldozer.vehicle, field, {
       trackWidth: 0.105, trackLength: 0.20, rideHeight: 0.016,
     });
-    elevateForSpawn(es.excavator.vehicle, field, es.excDrop, 0.025);
-    elevateForSpawn(es.bulldozer.vehicle, field, es.dozDrop, 0.028);
+    elevateForSpawn(es.excavator.vehicle, field, es.excDrop, 0.014);
+    elevateForSpawn(es.bulldozer.vehicle, field, es.dozDrop, 0.016);
     es.excDrop.onLanding = (intensity) => playLandingThump(intensity);
     es.dozDrop.onLanding = (intensity) => playLandingThump(intensity);
 
