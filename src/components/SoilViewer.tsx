@@ -34,6 +34,12 @@ import {
 import { getTerramechParams } from '@/lib/equipment/terramechanics';
 import { applyChassisTorque } from '@/lib/equipment/rigidBody';
 import { ExcavatorMesh, BulldozerMesh } from '@/components/EquipmentRenderer';
+import {
+  createSpawnDrop, elevateForSpawn, stepSpawnDrop, SpawnDropState,
+} from '@/lib/equipment/spawnDrop';
+import {
+  ensureAudioContext, updateVehicleAudio, playLandingThump,
+} from '@/lib/equipment/audio';
 
 export interface SoilStats {
   vertices: number;
