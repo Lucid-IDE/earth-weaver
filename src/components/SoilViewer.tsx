@@ -455,9 +455,20 @@ function EquipmentController({
     if (ctrl.switchToFreeCamera) es.activeEquipment = 'none';
     
     const clampedDt = Math.min(dt, 0.033);
-    
+
     let terrainChanged = false;
-    
+
+    // ── Spawn-drop: gravity-fall vehicles before any terrain-follow runs ──
+    const excFalling = stepSpawnDrop(
+      es.excDrop, es.excavator.vehicle, es.excPhysics.rigidBody,
+      field, sim, 0.025, es.excPhysics.mass.mass, clampedDt,
+    );
+    const dozFalling = stepSpawnDrop(
+      es.dozDrop, es.bulldozer.vehicle, es.dozPhysics.rigidBody,
+      field, sim, 0.028, es.dozPhysics.mass.mass, clampedDt,
+    );
+    if (es.excDrop.landed && es.excDrop.landed) terrainChanged = true;
+
     // Soil terramechanics + softness at vehicle position
     const getSoilContext = (veh: { posX: number; posZ: number }) => {
       const mat = getMaterialAt(veh.posX, 0, veh.posZ);
