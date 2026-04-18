@@ -34,6 +34,12 @@ import {
 import { getTerramechParams } from '@/lib/equipment/terramechanics';
 import { applyChassisTorque } from '@/lib/equipment/rigidBody';
 import { ExcavatorMesh, BulldozerMesh } from '@/components/EquipmentRenderer';
+import {
+  createSpawnDrop, elevateForSpawn, stepSpawnDrop, SpawnDropState,
+} from '@/lib/equipment/spawnDrop';
+import {
+  ensureAudioContext, updateVehicleAudio, playLandingThump,
+} from '@/lib/equipment/audio';
 
 export interface SoilStats {
   vertices: number;
@@ -418,9 +424,22 @@ function EquipmentController({
     impactMode: string | null;
     excPhysics: VehiclePhysicsState;
     dozPhysics: VehiclePhysicsState;
+    excDrop: SpawnDropState;
+    dozDrop: SpawnDropState;
   }>;
 }) {
   useEffect(() => { initControls(); }, []);
+
+  // Unlock audio on first user interaction (browsers require gesture).
+  useEffect(() => {
+    const unlock = () => { ensureAudioContext(); };
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
   
   useFrame((_, dt) => {
     const field = fieldRef.current;
@@ -436,9 +455,20 @@ function EquipmentController({
     if (ctrl.switchToFreeCamera) es.activeEquipment = 'none';
     
     const clampedDt = Math.min(dt, 0.033);
-    
+
     let terrainChanged = false;
-    
+
+    // ── Spawn-drop: gravity-fall vehicles before any terrain-follow runs ──
+    const excFalling = stepSpawnDrop(
+      es.excDrop, es.excavator.vehicle, es.excPhysics.rigidBody,
+      field, sim, 0.025, es.excPhysics.mass.mass, clampedDt,
+    );
+    const dozFalling = stepSpawnDrop(
+      es.dozDrop, es.bulldozer.vehicle, es.dozPhysics.rigidBody,
+      field, sim, 0.028, es.dozPhysics.mass.mass, clampedDt,
+    );
+    if (es.excDrop.landed && es.excDrop.landed) terrainChanged = true;
+
     // Soil terramechanics + softness at vehicle position
     const getSoilContext = (veh: { posX: number; posZ: number }) => {
       const mat = getMaterialAt(veh.posX, 0, veh.posZ);
@@ -469,16 +499,20 @@ function EquipmentController({
 
       updateExcavator(es.excavator, clampedDt, inputs, es.excPhysics.hydraulics);
 
-      updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-        trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
-        loadFactor: 0.95 + es.excavator.bucketFill * 0.3,
-        followSharpness: 0.55, maxDropSpeed: 0.6,
-      });
+      if (!excFalling) {
+        updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
+          trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+          loadFactor: 0.95 + es.excavator.bucketFill * 0.3,
+          followSharpness: 0.55, maxDropSpeed: 0.6,
+        });
+      }
 
-      updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-        trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
-        loadFactor: 1.2, allowTrackMarks: false,
-      });
+      if (!dozFalling) {
+        updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
+          trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+          loadFactor: 1.2, allowTrackMarks: false,
+        });
+      }
 
       // Dig/scoop/drop with chassis force feedback
       const armActive = Math.abs(inputs.boomInput) + Math.abs(inputs.stickInput) + Math.abs(inputs.bucketInput) > 0.01;
@@ -524,15 +558,19 @@ function EquipmentController({
 
       updateBulldozer(es.bulldozer, clampedDt, inputs, es.dozPhysics.hydraulics);
 
-      updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-        trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
-        loadFactor: 1.2, followSharpness: 0.50, maxDropSpeed: 0.5,
-      });
+      if (!dozFalling) {
+        updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
+          trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+          loadFactor: 1.2, followSharpness: 0.50, maxDropSpeed: 0.5,
+        });
+      }
 
-      updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-        trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
-        loadFactor: 0.95, allowTrackMarks: false,
-      });
+      if (!excFalling) {
+        updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
+          trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+          loadFactor: 0.95, allowTrackMarks: false,
+        });
+      }
 
       const isMoving = Math.abs(es.dozPhysics.forwardVelocity) > 0.002;
       const bladeEngaged = es.bulldozer.bladeHeight < 0.03;
@@ -551,15 +589,41 @@ function EquipmentController({
     es.bulldozer.vehicle.pitch += es.dozPhysics.rigidBody.pitchAccum;
 
     if (es.activeEquipment === 'none') {
-      updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-        trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
-        loadFactor: 0.95, allowTrackMarks: false,
-      });
-      updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-        trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
-        loadFactor: 1.2, allowTrackMarks: false,
-      });
+      if (!excFalling) {
+        updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
+          trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+          loadFactor: 0.95, allowTrackMarks: false,
+        });
+      }
+      if (!dozFalling) {
+        updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
+          trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+          loadFactor: 1.2, allowTrackMarks: false,
+        });
+      }
     }
+
+    // ── Audio: drive synthesis from physics state every frame ──
+    const excEng = es.excPhysics.engine;
+    const excHyd = es.excPhysics.hydraulics;
+    updateVehicleAudio('excavator', {
+      rpm: excEng.rpm, maxRpm: excEng.maxRpm, throttle: excEng.throttle,
+      lugging: excEng.lugging, stalled: excEng.stalled,
+      hydPressure: excHyd.pressure, hydFlow: excHyd.flowRate, reliefOpen: excHyd.reliefOpen,
+      trackSpeed: (Math.abs(es.excavator.vehicle.tracks.leftSpeed) + Math.abs(es.excavator.vehicle.tracks.rightSpeed)) * 0.5,
+      slip: es.excPhysics.slipAmount,
+      active: es.activeEquipment === 'excavator',
+    });
+    const dozEng = es.dozPhysics.engine;
+    const dozHyd = es.dozPhysics.hydraulics;
+    updateVehicleAudio('bulldozer', {
+      rpm: dozEng.rpm, maxRpm: dozEng.maxRpm, throttle: dozEng.throttle,
+      lugging: dozEng.lugging, stalled: dozEng.stalled,
+      hydPressure: dozHyd.pressure, hydFlow: dozHyd.flowRate, reliefOpen: dozHyd.reliefOpen,
+      trackSpeed: (Math.abs(es.bulldozer.vehicle.tracks.leftSpeed) + Math.abs(es.bulldozer.vehicle.tracks.rightSpeed)) * 0.5,
+      slip: es.dozPhysics.slipAmount,
+      active: es.activeEquipment === 'bulldozer',
+    });
 
     if (terrainChanged) {
       rebuildMesh();
@@ -618,6 +682,8 @@ function SoilTerrain({
     impactMode: null as string | null,
     excPhysics: createVehiclePhysics(createExcavatorMass(), 1.8, 2200),
     dozPhysics: createVehiclePhysics(createBulldozerMass(), 2.2, 2100),
+    excDrop: createSpawnDrop(0.16),
+    dozDrop: createSpawnDrop(0.18),
   });
 
   const material = useMemo(() => new THREE.ShaderMaterial({
@@ -674,7 +740,7 @@ function SoilTerrain({
     fieldRef.current = field;
     simRef.current = new SoilSimulator(field);
 
-    // Snap both vehicles onto terrain surface immediately
+    // Snap both vehicles onto terrain surface, then lift up for spawn drop
     const es = equipmentState.current;
     initVehicleOnTerrain(es.excavator.vehicle, field, {
       trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
@@ -682,6 +748,10 @@ function SoilTerrain({
     initVehicleOnTerrain(es.bulldozer.vehicle, field, {
       trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
     });
+    elevateForSpawn(es.excavator.vehicle, field, es.excDrop, 0.025);
+    elevateForSpawn(es.bulldozer.vehicle, field, es.dozDrop, 0.028);
+    es.excDrop.onLanding = (intensity) => playLandingThump(intensity);
+    es.dozDrop.onLanding = (intensity) => playLandingThump(intensity);
 
     rebuildMesh();
   }, [rebuildMesh]);
