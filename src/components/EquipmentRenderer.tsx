@@ -394,6 +394,8 @@ function IBeamSegment({
 }
 
 // ── Excavator Bucket (detailed) ─────────────────────────────────────
+// Real excavator bucket: wider opening than depth, curl axis at the stick
+// joint, opening faces forward (toward the bucket tip).
 function DetailedBucket({
   stickEnd, bucketTip, fill = 0,
 }: {
@@ -420,52 +422,128 @@ function DetailedBucket({
   quat.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
   const euler = new THREE.Euler().setFromQuaternion(quat);
 
-  const bw = 0.05; // bucket width
-  const bd = 0.04; // bucket depth (front to back)
-  const bh = len * 1.1; // bucket height follows segment
+  // Realistic ~0.5m³ class bucket: opening width > depth.
+  const bw = 0.060;       // bucket width (across opening)
+  const bd = 0.052;       // bucket depth (front-to-back, opening size)
+  const bh = len * 0.95;  // along stick→tip axis (cutting edge at -Y end)
+  const wallT = 0.0025;
 
   return (
     <group position={mid} rotation={euler}>
       {/* Back plate */}
-      <BoxAt pos={[0, 0, -bd * 0.4]} size={[bw, bh, 0.003]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
-      {/* Left side plate */}
-      <BoxAt pos={[-bw * 0.48, 0, -bd * 0.1]} size={[0.003, bh, bd * 0.7]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
-      {/* Right side plate */}
-      <BoxAt pos={[bw * 0.48, 0, -bd * 0.1]} size={[0.003, bh, bd * 0.7]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
-      {/* Bottom plate (scoop) */}
-      <BoxAt pos={[0, -bh * 0.42, 0]} size={[bw * 0.9, 0.003, bd * 0.6]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
-      {/* Cutting edge */}
-      <BoxAt pos={[0, -bh * 0.45, bd * 0.15]} size={[bw * 0.95, 0.004, 0.008]} color={COLORS.cutting} metalness={0.8} roughness={0.2} />
+      <BoxAt pos={[0, 0, -bd * 0.45]} size={[bw, bh, wallT]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
+      {/* Curved bottom (scoop floor) */}
+      <BoxAt pos={[0, -bh * 0.30, -bd * 0.18]} size={[bw - wallT, wallT, bd * 0.55]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} rotation={[0.45, 0, 0]} />
+      {/* Side plates */}
+      <BoxAt pos={[-bw * 0.5 + wallT * 0.5, -bh * 0.05, -bd * 0.08]} size={[wallT, bh * 0.85, bd * 0.85]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
+      <BoxAt pos={[ bw * 0.5 - wallT * 0.5, -bh * 0.05, -bd * 0.08]} size={[wallT, bh * 0.85, bd * 0.85]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
 
-      {/* Teeth (5 teeth) */}
-      {[-0.018, -0.009, 0, 0.009, 0.018].map((offset, i) => (
+      {/* Cutting edge (forward = +Z) */}
+      <BoxAt pos={[0, -bh * 0.48, bd * 0.18]} size={[bw * 0.96, 0.005, 0.010]} color={COLORS.cutting} metalness={0.85} roughness={0.2} />
+
+      {/* GET teeth */}
+      {[-0.022, -0.011, 0, 0.011, 0.022].map((offset, i) => (
         <group key={i}>
-          {/* Tooth adapter */}
           <BoxAt
-            pos={[offset, -bh * 0.47, bd * 0.18]}
-            size={[0.005, 0.006, 0.006]}
+            pos={[offset, -bh * 0.49, bd * 0.21]}
+            size={[0.0055, 0.0065, 0.007]}
             color={COLORS.medSteel}
             metalness={0.7}
             roughness={0.4}
           />
-          {/* Tooth point */}
-          <mesh position={[offset, -bh * 0.50, bd * 0.22]}>
-            <coneGeometry args={[0.003, 0.012, 4]} />
-            <meshStandardMaterial color={COLORS.teeth} metalness={0.8} roughness={0.3} />
+          <mesh position={[offset, -bh * 0.51, bd * 0.265]} rotation={[Math.PI / 2, 0, 0]}>
+            <coneGeometry args={[0.0035, 0.014, 4]} />
+            <meshStandardMaterial color={COLORS.teeth} metalness={0.85} roughness={0.3} />
           </mesh>
         </group>
       ))}
 
-      {/* Soil fill indicator */}
+      {/* Hinge ear at stick joint */}
+      <mesh position={[0, bh * 0.45, 0]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.008, 0.008, bw * 0.7, 10]} />
+        <meshStandardMaterial color={COLORS.medSteel} metalness={0.7} roughness={0.4} />
+      </mesh>
+
+      {/* Soil fill */}
       {fill > 0.05 && (
-        <BoxAt
-          pos={[0, -bh * 0.2, -bd * 0.1]}
-          size={[bw * 0.8 * fill, bh * 0.3 * fill, bd * 0.4 * fill]}
-          color="#6b5a3d"
-          metalness={0.1}
-          roughness={0.95}
-        />
+        <mesh position={[0, -bh * 0.18, -bd * 0.05]}>
+          <boxGeometry args={[bw * 0.85, Math.max(0.005, bh * 0.45 * fill), bd * 0.65 * Math.max(0.4, fill)]} />
+          <meshStandardMaterial color="#6b5a3d" metalness={0.05} roughness={0.95} />
+        </mesh>
       )}
+    </group>
+  );
+}
+
+// ── Exhaust Smoke Puff ──────────────────────────────────────────────
+// Fading dark puffs anchored to a local position. Intensity 0..1 controls
+// puff spawn rate + size. Smoke rises buoyantly and dissipates.
+function ExhaustSmoke({
+  origin, intensity = 0,
+}: {
+  origin: [number, number, number];
+  intensity?: number;
+}) {
+  const MAX = 24;
+  const meshRef = useRef<THREE.InstancedMesh>(null!);
+  const stateRef = useRef({
+    px: new Float32Array(MAX), py: new Float32Array(MAX), pz: new Float32Array(MAX),
+    vx: new Float32Array(MAX), vy: new Float32Array(MAX), vz: new Float32Array(MAX),
+    life: new Float32Array(MAX), scale: new Float32Array(MAX),
+    cursor: 0, accum: 0,
+  });
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  const mat = useMemo(() => new THREE.MeshStandardMaterial({
+    color: '#1f1f1f', transparent: true, opacity: 0.5,
+    roughness: 1, metalness: 0, depthWrite: false,
+  }), []);
+  const geo = useMemo(() => new THREE.SphereGeometry(0.012, 6, 6), []);
+
+  useFrame((_, dt) => {
+    const s = stateRef.current;
+    const cdt = Math.min(dt, 0.05);
+    const spawnRate = intensity * 16;
+    s.accum += spawnRate * cdt;
+    while (s.accum >= 1 && intensity > 0.02) {
+      s.accum -= 1;
+      const i = s.cursor;
+      s.cursor = (s.cursor + 1) % MAX;
+      s.px[i] = (Math.random() - 0.5) * 0.004;
+      s.py[i] = 0;
+      s.pz[i] = (Math.random() - 0.5) * 0.004;
+      s.vx[i] = (Math.random() - 0.5) * 0.015;
+      s.vy[i] = 0.04 + Math.random() * 0.05 + intensity * 0.04;
+      s.vz[i] = (Math.random() - 0.5) * 0.015;
+      s.life[i] = 1.0;
+      s.scale[i] = 0.4 + Math.random() * 0.5 + intensity * 0.6;
+    }
+    if (!meshRef.current) return;
+    let visible = 0;
+    for (let i = 0; i < MAX; i++) {
+      if (s.life[i] <= 0) continue;
+      s.px[i] += s.vx[i] * cdt;
+      s.py[i] += s.vy[i] * cdt;
+      s.pz[i] += s.vz[i] * cdt;
+      s.vx[i] *= 0.96; s.vz[i] *= 0.96;
+      s.vy[i] += 0.06 * cdt;
+      s.scale[i] += 0.7 * cdt;
+      s.life[i] -= cdt * 0.55;
+      if (s.life[i] <= 0) continue;
+      dummy.position.set(s.px[i], s.py[i], s.pz[i]);
+      const sc = s.scale[i] * (1.4 - s.life[i] * 0.4);
+      dummy.scale.setScalar(sc);
+      dummy.updateMatrix();
+      meshRef.current.setMatrixAt(visible, dummy.matrix);
+      visible++;
+    }
+    meshRef.current.count = visible;
+    meshRef.current.instanceMatrix.needsUpdate = true;
+    mat.opacity = 0.2 + intensity * 0.45;
+  });
+
+  return (
+    <group position={origin}>
+      <instancedMesh ref={meshRef} args={[geo, mat, MAX]} frustumCulled={false} />
     </group>
   );
 }
