@@ -797,6 +797,8 @@ export function BulldozerMesh({
         <cylinderGeometry args={[0.006, 0.006, 0.003, 8]} />
         <meshStandardMaterial color={COLORS.exhaust} metalness={0.6} roughness={0.5} />
       </mesh>
+      {/* Exhaust smoke puffs */}
+      <ExhaustSmoke origin={[-0.035, 0.102, -0.05]} intensity={exhaustIntensity} />
 
       {/* Air pre-cleaner (right side) */}
       <mesh position={[0.035, 0.075, -0.05]}>
