@@ -501,7 +501,7 @@ function EquipmentController({
 
       if (!excFalling) {
         updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-          trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+          trackWidth: 0.082, trackLength: 0.16, rideHeight: 0.014,
           loadFactor: 0.95 + es.excavator.bucketFill * 0.3,
           followSharpness: 0.55, maxDropSpeed: 0.6,
         });
@@ -509,7 +509,7 @@ function EquipmentController({
 
       if (!dozFalling) {
         updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-          trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+          trackWidth: 0.105, trackLength: 0.20, rideHeight: 0.016,
           loadFactor: 1.2, allowTrackMarks: false,
         });
       }
@@ -560,14 +560,14 @@ function EquipmentController({
 
       if (!dozFalling) {
         updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-          trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+          trackWidth: 0.105, trackLength: 0.20, rideHeight: 0.016,
           loadFactor: 1.2, followSharpness: 0.50, maxDropSpeed: 0.5,
         });
       }
 
       if (!excFalling) {
         updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-          trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+          trackWidth: 0.082, trackLength: 0.16, rideHeight: 0.014,
           loadFactor: 0.95, allowTrackMarks: false,
         });
       }
@@ -591,13 +591,13 @@ function EquipmentController({
     if (es.activeEquipment === 'none') {
       if (!excFalling) {
         updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-          trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+          trackWidth: 0.082, trackLength: 0.16, rideHeight: 0.014,
           loadFactor: 0.95, allowTrackMarks: false,
         });
       }
       if (!dozFalling) {
         updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-          trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+          trackWidth: 0.105, trackLength: 0.20, rideHeight: 0.016,
           loadFactor: 1.2, allowTrackMarks: false,
         });
       }
@@ -749,10 +749,10 @@ function SoilTerrain({
     // Snap both vehicles onto terrain surface, then lift up for spawn drop
     const es = equipmentState.current;
     initVehicleOnTerrain(es.excavator.vehicle, field, {
-      trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+      trackWidth: 0.082, trackLength: 0.16, rideHeight: 0.014,
     });
     initVehicleOnTerrain(es.bulldozer.vehicle, field, {
-      trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+      trackWidth: 0.105, trackLength: 0.20, rideHeight: 0.016,
     });
     elevateForSpawn(es.excavator.vehicle, field, es.excDrop, 0.025);
     elevateForSpawn(es.bulldozer.vehicle, field, es.dozDrop, 0.028);
