@@ -652,11 +652,17 @@ function EquipmentController({
   });
   
   const es = equipmentState.current;
-  
+  const excSmoke = Math.min(1,
+    es.excPhysics.engine.smoke * 0.7 +
+    es.excPhysics.engine.throttle * 0.25 + 0.05);
+  const dozSmoke = Math.min(1,
+    es.dozPhysics.engine.smoke * 0.7 +
+    es.dozPhysics.engine.throttle * 0.25 + 0.05);
+
   return (
     <>
-      <ExcavatorMesh state={es.excavator} />
-      <BulldozerMesh state={es.bulldozer} />
+      <ExcavatorMesh state={es.excavator} exhaustIntensity={excSmoke} />
+      <BulldozerMesh state={es.bulldozer} exhaustIntensity={dozSmoke} />
     </>
   );
 }
