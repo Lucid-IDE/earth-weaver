@@ -734,13 +734,18 @@ export function ExcavatorMesh({
 }
 
 // ── BULLDOZER ───────────────────────────────────────────────────────
-export function BulldozerMesh({ state }: { state: BulldozerState }) {
+export function BulldozerMesh({
+  state, exhaustIntensity = 0,
+}: { state: BulldozerState; exhaustIntensity?: number }) {
   const v = state.vehicle;
 
-  // Track dimensions (bulldozer is wider/longer than excavator)
-  const tw = 0.13;  // track center-to-center
-  const tl = 0.20;  // track length
-  const th = 0.032; // track height
+  // Track dimensions — gauge narrower than before; shoe width represents
+  // wide D6-style grouser shoes (~600mm scaled). `tw` kept as alias.
+  const gauge = 0.105;       // center-to-center spacing (was 0.13)
+  const shoeWidth = 0.040;
+  const tw = gauge;          // alias for downstream layout (push arms etc.)
+  const tl = 0.20;           // track length
+  const th = 0.032;          // track height
 
   // Blade geometry in local space
   const bladeW = state.bladeWidth;
@@ -750,15 +755,15 @@ export function BulldozerMesh({ state }: { state: BulldozerState }) {
   return (
     <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
       {/* ── Undercarriage ── */}
-      <TrackAssembly side={-1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={7} numPads={52}
+      <TrackAssembly side={-1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={7} numPads={52}
         travel={v.tracks.leftTravel} slack={v.tracks.slack} />
-      <TrackAssembly side={1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={7} numPads={52}
+      <TrackAssembly side={1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={7} numPads={52}
         travel={v.tracks.rightTravel} slack={v.tracks.slack} />
 
       {/* Track frame cross-members */}
-      <BoxAt pos={[0, -th * 0.3, -tl * 0.3]} size={[tw * 0.5, 0.008, 0.01]} color={COLORS.darkSteel} />
-      <BoxAt pos={[0, -th * 0.3, 0]} size={[tw * 0.5, 0.008, 0.01]} color={COLORS.darkSteel} />
-      <BoxAt pos={[0, -th * 0.3, tl * 0.3]} size={[tw * 0.5, 0.008, 0.01]} color={COLORS.darkSteel} />
+      <BoxAt pos={[0, -th * 0.05, -tl * 0.3]} size={[gauge * 0.6, 0.008, 0.01]} color={COLORS.darkSteel} />
+      <BoxAt pos={[0, -th * 0.05, 0]} size={[gauge * 0.6, 0.008, 0.01]} color={COLORS.darkSteel} />
+      <BoxAt pos={[0, -th * 0.05, tl * 0.3]} size={[gauge * 0.6, 0.008, 0.01]} color={COLORS.darkSteel} />
 
       {/* ── Main body / engine deck ── */}
       <BoxAt pos={[0, 0.02, -0.02]} size={[0.09, 0.025, 0.14]} color={COLORS.catYellow} />
