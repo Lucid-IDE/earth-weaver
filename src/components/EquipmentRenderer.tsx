@@ -142,13 +142,18 @@ function PinJoint({ pos, radius = 0.006 }: { pos: [number, number, number]; radi
 }
 
 // ── Track Assembly ──────────────────────────────────────────────────
-// Realistic tracked undercarriage with sprocket, idler, rollers, track pads.
-// Pads SCROLL based on track travel (real linear distance, not frame count)
-// and exhibit SLACK sag when slipping (slack 0..1).
+// Real articulated track: pads wrap a closed perimeter consisting of
+//   bottom run (idler→sprocket along ground) →
+//   sprocket arc (rear, raised) →
+//   top run (sprocket→idler, slightly above hull base) →
+//   idler arc (front).
+// Each pad is positioned + rotated by sampling its arc-length parameter
+// along this perimeter. `travel` advances the parameter so the chain
+// scrolls realistically. Slack adds catenary sag to the top run.
 function TrackAssembly({
-  side, // -1 = left, 1 = right
+  side,
   trackWidth, trackLength, trackHeight,
-  numRollers = 6, numPads = 14,
+  numRollers = 6, numPads = 36,
   travel = 0,
   slack = 0,
 }: {
@@ -162,118 +167,172 @@ function TrackAssembly({
   slack?: number;
 }) {
   const xOff = side * trackWidth / 2;
-  // Convert linear travel (world u) into a phase along the track perimeter.
-  // Loop length ≈ 2 × trackLength (top + bottom runs). Pads roll continuously.
-  const loopLen = trackLength * 1.9;
-  const padPhase = ((travel % loopLen) + loopLen) % loopLen;
-  const padPitchBottom = (trackLength * 0.9) / numPads;
-  // Slack sag: bottom run pads droop slightly between rollers.
-  const sag = slack * 0.004;
-  const padWidth = 0.024;
-  const frameWidth = 0.008;
-  const rollerRadius = trackHeight * 0.35;
+
+  const halfL = trackLength * 0.45;
   const sprocketRadius = trackHeight * 0.55;
   const idlerRadius = trackHeight * 0.45;
+  const sprocketCenter: [number, number] = [-halfL, 0];
+  const idlerCenter: [number, number] = [halfL, -trackHeight * 0.15];
+  const bottomY = -trackHeight * 0.85;
+  const topY = trackHeight * 0.05;
+
+  const padWidth = trackWidth * 0.95;
+  const padThick = 0.0035;
+  const frameWidth = trackWidth * 0.55;
+
+  type Seg =
+    | { type: 'line'; sz: number; sy: number; ez: number; ey: number; len: number }
+    | { type: 'arc'; cz: number; cy: number; r: number; a0: number; a1: number; len: number };
+  const segments: Seg[] = [];
+
+  const idlerBottom: [number, number] = [idlerCenter[0], idlerCenter[1] - idlerRadius];
+  const sprocketBottom: [number, number] = [sprocketCenter[0], sprocketCenter[1] - sprocketRadius];
+  segments.push({
+    type: 'line',
+    sz: idlerBottom[0], sy: idlerBottom[1],
+    ez: sprocketBottom[0], ey: sprocketBottom[1],
+    len: Math.hypot(sprocketBottom[0] - idlerBottom[0], sprocketBottom[1] - idlerBottom[1]),
+  });
+  segments.push({
+    type: 'arc',
+    cz: sprocketCenter[0], cy: sprocketCenter[1], r: sprocketRadius,
+    a0: -Math.PI / 2, a1: -Math.PI * 1.5,
+    len: Math.PI * sprocketRadius,
+  });
+  const sprocketTop: [number, number] = [sprocketCenter[0], sprocketCenter[1] + sprocketRadius];
+  const idlerTop: [number, number] = [idlerCenter[0], idlerCenter[1] + idlerRadius];
+  segments.push({
+    type: 'line',
+    sz: sprocketTop[0], sy: sprocketTop[1],
+    ez: idlerTop[0], ey: idlerTop[1],
+    len: Math.hypot(idlerTop[0] - sprocketTop[0], idlerTop[1] - sprocketTop[1]),
+  });
+  segments.push({
+    type: 'arc',
+    cz: idlerCenter[0], cy: idlerCenter[1], r: idlerRadius,
+    a0: Math.PI / 2, a1: -Math.PI / 2,
+    len: Math.PI * idlerRadius,
+  });
+
+  const totalLen = segments.reduce((s, seg) => s + seg.len, 0);
+
+  function sampleAt(s: number): { z: number; y: number; tangent: number } {
+    let acc = 0;
+    for (const seg of segments) {
+      if (s <= acc + seg.len) {
+        const t = (s - acc) / seg.len;
+        if (seg.type === 'line') {
+          const z = seg.sz + (seg.ez - seg.sz) * t;
+          const y = seg.sy + (seg.ey - seg.sy) * t;
+          const tangent = Math.atan2(seg.ey - seg.sy, seg.ez - seg.sz);
+          return { z, y, tangent };
+        }
+        const a = seg.a0 + (seg.a1 - seg.a0) * t;
+        const z = seg.cz + Math.cos(a) * seg.r;
+        const y = seg.cy + Math.sin(a) * seg.r;
+        const dir = Math.sign(seg.a1 - seg.a0);
+        const tangent = a + dir * Math.PI / 2;
+        return { z, y, tangent };
+      }
+      acc += seg.len;
+    }
+    return { z: 0, y: 0, tangent: 0 };
+  }
+
+  const phase = ((travel * (totalLen / (trackLength * 1.9))) % totalLen + totalLen) % totalLen;
+  const padSpacing = totalLen / numPads;
+  const sagAmp = slack * trackHeight * 0.25;
+  const topRunStart = segments[0].len + segments[1].len;
+  const topRunEnd = topRunStart + segments[2].len;
+
+  const pads: React.ReactNode[] = [];
+  for (let i = 0; i < numPads; i++) {
+    const s = ((i * padSpacing - phase) % totalLen + totalLen) % totalLen;
+    const sample = sampleAt(s);
+    let y = sample.y;
+    if (sagAmp > 0 && s >= topRunStart && s <= topRunEnd) {
+      const t = (s - topRunStart) / (topRunEnd - topRunStart);
+      y -= Math.sin(t * Math.PI) * sagAmp;
+    }
+    pads.push(
+      <group
+        key={`p${i}`}
+        position={[xOff, y, sample.z]}
+        rotation={[sample.tangent, 0, 0]}
+      >
+        <mesh>
+          <boxGeometry args={[padWidth, padThick, padSpacing * 0.78]} />
+          <meshStandardMaterial color={COLORS.darkSteel} metalness={0.55} roughness={0.7} />
+        </mesh>
+        <mesh position={[0, -padThick * 0.5 - 0.0015, 0]}>
+          <boxGeometry args={[padWidth * 0.95, 0.0025, padSpacing * 0.18]} />
+          <meshStandardMaterial color={COLORS.medSteel} metalness={0.6} roughness={0.6} />
+        </mesh>
+      </group>
+    );
+  }
 
   return (
     <group>
-      {/* Track frame (side plate) */}
       <BoxAt
-        pos={[xOff, -trackHeight * 0.4, 0]}
-        size={[frameWidth, trackHeight * 0.6, trackLength * 0.9]}
+        pos={[xOff + side * frameWidth * 0.4, -trackHeight * 0.35, 0]}
+        size={[0.005, trackHeight * 0.7, trackLength * 0.92]}
+        color={COLORS.catYellowDark}
+        metalness={0.5}
+        roughness={0.6}
+      />
+      <BoxAt
+        pos={[xOff - side * frameWidth * 0.4, -trackHeight * 0.35, 0]}
+        size={[0.005, trackHeight * 0.7, trackLength * 0.92]}
         color={COLORS.catYellowDark}
         metalness={0.5}
         roughness={0.6}
       />
 
-      {/* Drive sprocket (rear, raised) */}
-      <mesh position={[xOff, 0, -trackLength * 0.42]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[sprocketRadius, sprocketRadius, frameWidth * 1.2, 12]} />
-        <meshStandardMaterial color={COLORS.darkSteel} metalness={0.6} roughness={0.5} />
+      <mesh position={[xOff, sprocketCenter[1], sprocketCenter[0]]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[sprocketRadius, sprocketRadius, frameWidth * 0.9, 14]} />
+        <meshStandardMaterial color={COLORS.darkSteel} metalness={0.7} roughness={0.45} />
       </mesh>
-      {/* Sprocket teeth */}
-      {Array.from({ length: 8 }).map((_, i) => {
-        const a = (i / 8) * Math.PI * 2;
+      {Array.from({ length: 10 }).map((_, i) => {
+        const a = (i / 10) * Math.PI * 2 + travel * 6;
         return (
           <mesh key={`st${i}`}
             position={[
               xOff,
-              Math.sin(a) * sprocketRadius * 0.85,
-              -trackLength * 0.42 + Math.cos(a) * sprocketRadius * 0.85,
+              sprocketCenter[1] + Math.sin(a) * sprocketRadius * 0.95,
+              sprocketCenter[0] + Math.cos(a) * sprocketRadius * 0.95,
             ]}
+            rotation={[a, 0, 0]}
           >
-            <boxGeometry args={[frameWidth * 0.8, 0.004, 0.004]} />
-            <meshStandardMaterial color={COLORS.darkSteel} metalness={0.6} roughness={0.5} />
+            <boxGeometry args={[frameWidth * 0.85, 0.005, 0.005]} />
+            <meshStandardMaterial color={COLORS.medSteel} metalness={0.7} roughness={0.45} />
           </mesh>
         );
       })}
 
-      {/* Front idler */}
-      <mesh position={[xOff, -trackHeight * 0.15, trackLength * 0.42]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[idlerRadius, idlerRadius, frameWidth * 1.1, 12]} />
-        <meshStandardMaterial color={COLORS.darkSteel} metalness={0.6} roughness={0.5} />
+      <mesh position={[xOff, idlerCenter[1], idlerCenter[0]]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[idlerRadius, idlerRadius, frameWidth * 0.85, 14]} />
+        <meshStandardMaterial color={COLORS.darkSteel} metalness={0.7} roughness={0.45} />
       </mesh>
 
-      {/* Bottom rollers */}
       {Array.from({ length: numRollers }).map((_, i) => {
-        const z = -trackLength * 0.38 + (i / (numRollers - 1)) * trackLength * 0.76;
+        const z = sprocketBottom[0] + (idlerBottom[0] - sprocketBottom[0]) * ((i + 0.5) / numRollers);
         return (
-          <mesh key={`r${i}`} position={[xOff, -trackHeight * 0.75, z]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[rollerRadius, rollerRadius, frameWidth * 0.9, 8]} />
+          <mesh key={`r${i}`} position={[xOff, bottomY + trackHeight * 0.18, z]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[trackHeight * 0.32, trackHeight * 0.32, frameWidth * 0.7, 10]} />
             <meshStandardMaterial color={COLORS.medSteel} metalness={0.6} roughness={0.5} />
           </mesh>
         );
       })}
 
-      {/* Top carrier roller */}
-      <mesh position={[xOff, trackHeight * 0.05, 0]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[rollerRadius * 0.7, rollerRadius * 0.7, frameWidth * 0.8, 8]} />
-        <meshStandardMaterial color={COLORS.medSteel} metalness={0.6} roughness={0.5} />
-      </mesh>
+      {[-trackLength * 0.15, trackLength * 0.15].map((z, i) => (
+        <mesh key={`tr${i}`} position={[xOff, topY - trackHeight * 0.1, z]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[trackHeight * 0.22, trackHeight * 0.22, frameWidth * 0.6, 8]} />
+          <meshStandardMaterial color={COLORS.medSteel} metalness={0.6} roughness={0.5} />
+        </mesh>
+      ))}
 
-      {/* Track pads (bottom) — scroll along Z by phase */}
-      {Array.from({ length: numPads }).map((_, i) => {
-        const baseZ = -trackLength * 0.45 + (i / (numPads - 1)) * trackLength * 0.9;
-        const offsetZ = ((baseZ + padPhase) % loopLen + loopLen) % loopLen - loopLen * 0.5;
-        const midProx = 1 - Math.abs(offsetZ / (trackLength * 0.45));
-        const ySag = -sag * Math.max(0, midProx);
-        return (
-          <BoxAt key={`bp${i}`}
-            pos={[xOff, -trackHeight * 0.88 + ySag, offsetZ]}
-            size={[padWidth, 0.003, padPitchBottom * 0.85]}
-            color={COLORS.rubber}
-            metalness={0.2}
-            roughness={0.9}
-          />
-        );
-      })}
-
-      {/* Track pads (top) — scroll opposite direction */}
-      {Array.from({ length: Math.floor(numPads * 0.6) }).map((_, i) => {
-        const cnt = Math.floor(numPads * 0.6);
-        const baseZ = -trackLength * 0.3 + (i / (cnt - 1)) * trackLength * 0.6;
-        const offsetZ = ((baseZ - padPhase) % loopLen + loopLen) % loopLen - loopLen * 0.5;
-        const midProx = 1 - Math.abs(offsetZ / (trackLength * 0.3));
-        const ySag = sag * 0.6 * Math.max(0, midProx);
-        return (
-          <BoxAt key={`tp${i}`}
-            pos={[xOff, trackHeight * 0.12 + ySag, offsetZ]}
-            size={[padWidth, 0.003, padPitchBottom * 0.85]}
-            color={COLORS.rubber}
-            metalness={0.2}
-            roughness={0.9}
-          />
-        );
-      })}
-
-      {/* Track guard / mud flap */}
-      <BoxAt
-        pos={[xOff + side * 0.002, -trackHeight * 0.1, 0]}
-        size={[0.002, trackHeight * 0.3, trackLength * 0.7]}
-        color={COLORS.catYellow}
-        metalness={0.4}
-        roughness={0.6}
-      />
+      {pads}
     </group>
   );
 }
