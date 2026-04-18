@@ -317,22 +317,31 @@ function TrackAssembly({
         <meshStandardMaterial color={COLORS.darkSteel} metalness={0.7} roughness={0.45} />
       </mesh>
 
+      {/* Bottom road wheels — sized to ride EXACTLY on the pad bottom line.
+          Center placed so the wheel bottom tangent equals (bottomY + padThick),
+          which is the top of the pads sitting on the ground.  */}
       {Array.from({ length: numRollers }).map((_, i) => {
-        const z = sprocketBottom[0] + (idlerBottom[0] - sprocketBottom[0]) * ((i + 0.5) / numRollers);
+        const z = sprocketCenter[0] + (idlerCenter[0] - sprocketCenter[0]) * ((i + 0.5) / numRollers);
+        const rollerR = trackHeight * 0.18;
+        const yC = bottomY + padThick + rollerR; // sits on top of pads
         return (
-          <mesh key={`r${i}`} position={[xOff, bottomY + trackHeight * 0.18, z]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[trackHeight * 0.32, trackHeight * 0.32, frameWidth * 0.7, 10]} />
+          <mesh key={`r${i}`} position={[xOff, yC, z]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[rollerR, rollerR, frameWidth * 0.95, 10]} />
             <meshStandardMaterial color={COLORS.medSteel} metalness={0.6} roughness={0.5} />
           </mesh>
         );
       })}
 
-      {[-trackLength * 0.15, trackLength * 0.15].map((z, i) => (
-        <mesh key={`tr${i}`} position={[xOff, topY - trackHeight * 0.1, z]} rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[trackHeight * 0.22, trackHeight * 0.22, frameWidth * 0.6, 8]} />
-          <meshStandardMaterial color={COLORS.medSteel} metalness={0.6} roughness={0.5} />
-        </mesh>
-      ))}
+      {/* Top carrier rollers (smaller, support top run) */}
+      {[-trackLength * 0.18, trackLength * 0.18].map((z, i) => {
+        const rollerR = trackHeight * 0.13;
+        return (
+          <mesh key={`tr${i}`} position={[xOff, topY - rollerR, z]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[rollerR, rollerR, frameWidth * 0.85, 8]} />
+            <meshStandardMaterial color={COLORS.medSteel} metalness={0.6} roughness={0.5} />
+          </mesh>
+        );
+      })}
 
       {pads}
     </group>
