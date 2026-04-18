@@ -142,43 +142,45 @@ function PinJoint({ pos, radius = 0.006 }: { pos: [number, number, number]; radi
 }
 
 // ── Track Assembly ──────────────────────────────────────────────────
-// Real articulated track: pads wrap a closed perimeter consisting of
-//   bottom run (idler→sprocket along ground) →
-//   sprocket arc (rear, raised) →
-//   top run (sprocket→idler, slightly above hull base) →
-//   idler arc (front).
-// Each pad is positioned + rotated by sampling its arc-length parameter
-// along this perimeter. `travel` advances the parameter so the chain
-// scrolls realistically. Slack adds catenary sag to the top run.
+// Real articulated track. `gauge` is the center-to-center distance between
+// the two tracks (chassis width). `shoeWidth` is the actual width of each
+// individual track pad — much narrower than the gauge. Sprocket (rear) and
+// idler (front) sit at the same bottom tangent so the bottom run is a
+// perfectly horizontal flat line that the rollers ride along.
 function TrackAssembly({
   side,
-  trackWidth, trackLength, trackHeight,
+  gauge, trackLength, trackHeight, shoeWidth,
   numRollers = 6, numPads = 36,
   travel = 0,
   slack = 0,
 }: {
   side: number;
-  trackWidth: number;
+  gauge: number;        // center-to-center spacing between left/right tracks
   trackLength: number;
   trackHeight: number;
+  shoeWidth: number;    // actual pad shoe width (narrower than gauge)
   numRollers?: number;
   numPads?: number;
   travel?: number;
   slack?: number;
 }) {
-  const xOff = side * trackWidth / 2;
+  const xOff = side * gauge / 2;
 
   const halfL = trackLength * 0.45;
-  const sprocketRadius = trackHeight * 0.55;
-  const idlerRadius = trackHeight * 0.45;
-  const sprocketCenter: [number, number] = [-halfL, 0];
-  const idlerCenter: [number, number] = [halfL, -trackHeight * 0.15];
-  const bottomY = -trackHeight * 0.85;
-  const topY = trackHeight * 0.05;
+  // Sprocket slightly larger than idler, but BOTH bottoms tangent to the
+  // same ground line so pads form a flat bottom run with no protrusions.
+  const sprocketRadius = trackHeight * 0.42;
+  const idlerRadius = trackHeight * 0.40;
+  // Place wheel CENTERS so their bottom tangents share `bottomY`.
+  const bottomY = -trackHeight * 0.50;
+  const sprocketCenter: [number, number] = [-halfL, bottomY + sprocketRadius];
+  const idlerCenter: [number, number] = [halfL, bottomY + idlerRadius];
+  const topY = trackHeight * 0.42;
 
-  const padWidth = trackWidth * 0.95;
-  const padThick = 0.0035;
-  const frameWidth = trackWidth * 0.55;
+  const padWidth = shoeWidth;
+  const padThick = 0.0030;
+  // Side frame much narrower than gauge — should match shoe + a little.
+  const frameWidth = shoeWidth * 0.85;
 
   type Seg =
     | { type: 'line'; sz: number; sy: number; ez: number; ey: number; len: number }
