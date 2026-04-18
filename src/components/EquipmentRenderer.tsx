@@ -549,27 +549,33 @@ function ExhaustSmoke({
 }
 
 // ── EXCAVATOR ───────────────────────────────────────────────────────
-export function ExcavatorMesh({ state }: { state: ExcavatorState }) {
+export function ExcavatorMesh({
+  state, exhaustIntensity = 0,
+}: { state: ExcavatorState; exhaustIntensity?: number }) {
   const v = state.vehicle;
   const lk = computeExcavatorLocalFK(state);
 
-  // Track dimensions
-  const tw = 0.10;  // track center-to-center
-  const tl = 0.16;  // track length
-  const th = 0.028; // track height
+  // Track dimensions — gauge is chassis-wide spacing between tracks,
+  // shoeWidth is the much narrower individual pad width.
+  const gauge = 0.082;     // center-to-center spacing (was 0.10, too wide)
+  const shoeWidth = 0.032; // realistic ~600mm shoes scaled down
+  const tl = 0.16;         // track length
+  const th = 0.028;        // track height
 
   return (
     <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
       {/* ── Undercarriage ── */}
-      <TrackAssembly side={-1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={5} numPads={42}
+      <TrackAssembly side={-1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={5} numPads={42}
         travel={v.tracks.leftTravel} slack={v.tracks.slack} />
-      <TrackAssembly side={1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={5} numPads={42}
+      <TrackAssembly side={1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={5} numPads={42}
         travel={v.tracks.rightTravel} slack={v.tracks.slack} />
 
-      {/* Track frame cross-members */}
-      <BoxAt pos={[0, -th * 0.3, -tl * 0.25]} size={[tw * 0.6, 0.006, 0.008]} color={COLORS.darkSteel} metalness={0.6} roughness={0.5} />
-      <BoxAt pos={[0, -th * 0.3, tl * 0.25]} size={[tw * 0.6, 0.006, 0.008]} color={COLORS.darkSteel} metalness={0.6} roughness={0.5} />
+      {/* Track frame cross-members (span between the two tracks) */}
+      <BoxAt pos={[0, -th * 0.05, -tl * 0.25]} size={[gauge * 0.7, 0.006, 0.008]} color={COLORS.darkSteel} metalness={0.6} roughness={0.5} />
+      <BoxAt pos={[0, -th * 0.05, tl * 0.25]} size={[gauge * 0.7, 0.006, 0.008]} color={COLORS.darkSteel} metalness={0.6} roughness={0.5} />
 
+      {/* Keep tw alias for downstream layout below */}
+      {(() => { /* no-op */ return null; })()}
       {/* Center platform / turntable ring */}
       <mesh position={[0, 0.005, 0]}>
         <cylinderGeometry args={[0.035, 0.038, 0.008, 16]} />
