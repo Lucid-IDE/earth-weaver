@@ -461,11 +461,11 @@ function EquipmentController({
     // ── Spawn-drop: gravity-fall vehicles before any terrain-follow runs ──
     const excFalling = stepSpawnDrop(
       es.excDrop, es.excavator.vehicle, es.excPhysics.rigidBody,
-      field, sim, 0.025, es.excPhysics.mass.mass, clampedDt,
+      field, sim, 0.014, es.excPhysics.mass.mass, clampedDt,
     );
     const dozFalling = stepSpawnDrop(
       es.dozDrop, es.bulldozer.vehicle, es.dozPhysics.rigidBody,
-      field, sim, 0.028, es.dozPhysics.mass.mass, clampedDt,
+      field, sim, 0.016, es.dozPhysics.mass.mass, clampedDt,
     );
     if (es.excDrop.landed && es.excDrop.landed) terrainChanged = true;
 
@@ -501,7 +501,7 @@ function EquipmentController({
 
       if (!excFalling) {
         updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-          trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+          trackWidth: 0.082, trackLength: 0.16, rideHeight: 0.014,
           loadFactor: 0.95 + es.excavator.bucketFill * 0.3,
           followSharpness: 0.55, maxDropSpeed: 0.6,
         });
@@ -509,7 +509,7 @@ function EquipmentController({
 
       if (!dozFalling) {
         updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-          trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+          trackWidth: 0.105, trackLength: 0.20, rideHeight: 0.016,
           loadFactor: 1.2, allowTrackMarks: false,
         });
       }
@@ -560,14 +560,14 @@ function EquipmentController({
 
       if (!dozFalling) {
         updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-          trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+          trackWidth: 0.105, trackLength: 0.20, rideHeight: 0.016,
           loadFactor: 1.2, followSharpness: 0.50, maxDropSpeed: 0.5,
         });
       }
 
       if (!excFalling) {
         updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-          trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+          trackWidth: 0.082, trackLength: 0.16, rideHeight: 0.014,
           loadFactor: 0.95, allowTrackMarks: false,
         });
       }
@@ -591,13 +591,13 @@ function EquipmentController({
     if (es.activeEquipment === 'none') {
       if (!excFalling) {
         updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
-          trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+          trackWidth: 0.082, trackLength: 0.16, rideHeight: 0.014,
           loadFactor: 0.95, allowTrackMarks: false,
         });
       }
       if (!dozFalling) {
         updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
-          trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+          trackWidth: 0.105, trackLength: 0.20, rideHeight: 0.016,
           loadFactor: 1.2, allowTrackMarks: false,
         });
       }
@@ -652,11 +652,17 @@ function EquipmentController({
   });
   
   const es = equipmentState.current;
-  
+  const excSmoke = Math.min(1,
+    es.excPhysics.engine.smoke * 0.7 +
+    es.excPhysics.engine.throttle * 0.25 + 0.05);
+  const dozSmoke = Math.min(1,
+    es.dozPhysics.engine.smoke * 0.7 +
+    es.dozPhysics.engine.throttle * 0.25 + 0.05);
+
   return (
     <>
-      <ExcavatorMesh state={es.excavator} />
-      <BulldozerMesh state={es.bulldozer} />
+      <ExcavatorMesh state={es.excavator} exhaustIntensity={excSmoke} />
+      <BulldozerMesh state={es.bulldozer} exhaustIntensity={dozSmoke} />
     </>
   );
 }
@@ -743,13 +749,13 @@ function SoilTerrain({
     // Snap both vehicles onto terrain surface, then lift up for spawn drop
     const es = equipmentState.current;
     initVehicleOnTerrain(es.excavator.vehicle, field, {
-      trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
+      trackWidth: 0.082, trackLength: 0.16, rideHeight: 0.014,
     });
     initVehicleOnTerrain(es.bulldozer.vehicle, field, {
-      trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
+      trackWidth: 0.105, trackLength: 0.20, rideHeight: 0.016,
     });
-    elevateForSpawn(es.excavator.vehicle, field, es.excDrop, 0.025);
-    elevateForSpawn(es.bulldozer.vehicle, field, es.dozDrop, 0.028);
+    elevateForSpawn(es.excavator.vehicle, field, es.excDrop, 0.014);
+    elevateForSpawn(es.bulldozer.vehicle, field, es.dozDrop, 0.016);
     es.excDrop.onLanding = (intensity) => playLandingThump(intensity);
     es.dozDrop.onLanding = (intensity) => playLandingThump(intensity);
 

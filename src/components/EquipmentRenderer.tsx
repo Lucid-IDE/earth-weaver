@@ -142,43 +142,45 @@ function PinJoint({ pos, radius = 0.006 }: { pos: [number, number, number]; radi
 }
 
 // ── Track Assembly ──────────────────────────────────────────────────
-// Real articulated track: pads wrap a closed perimeter consisting of
-//   bottom run (idler→sprocket along ground) →
-//   sprocket arc (rear, raised) →
-//   top run (sprocket→idler, slightly above hull base) →
-//   idler arc (front).
-// Each pad is positioned + rotated by sampling its arc-length parameter
-// along this perimeter. `travel` advances the parameter so the chain
-// scrolls realistically. Slack adds catenary sag to the top run.
+// Real articulated track. `gauge` is the center-to-center distance between
+// the two tracks (chassis width). `shoeWidth` is the actual width of each
+// individual track pad — much narrower than the gauge. Sprocket (rear) and
+// idler (front) sit at the same bottom tangent so the bottom run is a
+// perfectly horizontal flat line that the rollers ride along.
 function TrackAssembly({
   side,
-  trackWidth, trackLength, trackHeight,
+  gauge, trackLength, trackHeight, shoeWidth,
   numRollers = 6, numPads = 36,
   travel = 0,
   slack = 0,
 }: {
   side: number;
-  trackWidth: number;
+  gauge: number;        // center-to-center spacing between left/right tracks
   trackLength: number;
   trackHeight: number;
+  shoeWidth: number;    // actual pad shoe width (narrower than gauge)
   numRollers?: number;
   numPads?: number;
   travel?: number;
   slack?: number;
 }) {
-  const xOff = side * trackWidth / 2;
+  const xOff = side * gauge / 2;
 
   const halfL = trackLength * 0.45;
-  const sprocketRadius = trackHeight * 0.55;
-  const idlerRadius = trackHeight * 0.45;
-  const sprocketCenter: [number, number] = [-halfL, 0];
-  const idlerCenter: [number, number] = [halfL, -trackHeight * 0.15];
-  const bottomY = -trackHeight * 0.85;
-  const topY = trackHeight * 0.05;
+  // Sprocket slightly larger than idler, but BOTH bottoms tangent to the
+  // same ground line so pads form a flat bottom run with no protrusions.
+  const sprocketRadius = trackHeight * 0.42;
+  const idlerRadius = trackHeight * 0.40;
+  // Place wheel CENTERS so their bottom tangents share `bottomY`.
+  const bottomY = -trackHeight * 0.50;
+  const sprocketCenter: [number, number] = [-halfL, bottomY + sprocketRadius];
+  const idlerCenter: [number, number] = [halfL, bottomY + idlerRadius];
+  const topY = trackHeight * 0.42;
 
-  const padWidth = trackWidth * 0.95;
-  const padThick = 0.0035;
-  const frameWidth = trackWidth * 0.55;
+  const padWidth = shoeWidth;
+  const padThick = 0.0030;
+  // Side frame much narrower than gauge — should match shoe + a little.
+  const frameWidth = shoeWidth * 0.85;
 
   type Seg =
     | { type: 'line'; sz: number; sy: number; ez: number; ey: number; len: number }
@@ -315,22 +317,31 @@ function TrackAssembly({
         <meshStandardMaterial color={COLORS.darkSteel} metalness={0.7} roughness={0.45} />
       </mesh>
 
+      {/* Bottom road wheels — sized to ride EXACTLY on the pad bottom line.
+          Center placed so the wheel bottom tangent equals (bottomY + padThick),
+          which is the top of the pads sitting on the ground.  */}
       {Array.from({ length: numRollers }).map((_, i) => {
-        const z = sprocketBottom[0] + (idlerBottom[0] - sprocketBottom[0]) * ((i + 0.5) / numRollers);
+        const z = sprocketCenter[0] + (idlerCenter[0] - sprocketCenter[0]) * ((i + 0.5) / numRollers);
+        const rollerR = trackHeight * 0.18;
+        const yC = bottomY + padThick + rollerR; // sits on top of pads
         return (
-          <mesh key={`r${i}`} position={[xOff, bottomY + trackHeight * 0.18, z]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[trackHeight * 0.32, trackHeight * 0.32, frameWidth * 0.7, 10]} />
+          <mesh key={`r${i}`} position={[xOff, yC, z]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[rollerR, rollerR, frameWidth * 0.95, 10]} />
             <meshStandardMaterial color={COLORS.medSteel} metalness={0.6} roughness={0.5} />
           </mesh>
         );
       })}
 
-      {[-trackLength * 0.15, trackLength * 0.15].map((z, i) => (
-        <mesh key={`tr${i}`} position={[xOff, topY - trackHeight * 0.1, z]} rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[trackHeight * 0.22, trackHeight * 0.22, frameWidth * 0.6, 8]} />
-          <meshStandardMaterial color={COLORS.medSteel} metalness={0.6} roughness={0.5} />
-        </mesh>
-      ))}
+      {/* Top carrier rollers (smaller, support top run) */}
+      {[-trackLength * 0.18, trackLength * 0.18].map((z, i) => {
+        const rollerR = trackHeight * 0.13;
+        return (
+          <mesh key={`tr${i}`} position={[xOff, topY - rollerR, z]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[rollerR, rollerR, frameWidth * 0.85, 8]} />
+            <meshStandardMaterial color={COLORS.medSteel} metalness={0.6} roughness={0.5} />
+          </mesh>
+        );
+      })}
 
       {pads}
     </group>
@@ -383,6 +394,8 @@ function IBeamSegment({
 }
 
 // ── Excavator Bucket (detailed) ─────────────────────────────────────
+// Real excavator bucket: wider opening than depth, curl axis at the stick
+// joint, opening faces forward (toward the bucket tip).
 function DetailedBucket({
   stickEnd, bucketTip, fill = 0,
 }: {
@@ -409,78 +422,160 @@ function DetailedBucket({
   quat.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
   const euler = new THREE.Euler().setFromQuaternion(quat);
 
-  const bw = 0.05; // bucket width
-  const bd = 0.04; // bucket depth (front to back)
-  const bh = len * 1.1; // bucket height follows segment
+  // Realistic ~0.5m³ class bucket: opening width > depth.
+  const bw = 0.060;       // bucket width (across opening)
+  const bd = 0.052;       // bucket depth (front-to-back, opening size)
+  const bh = len * 0.95;  // along stick→tip axis (cutting edge at -Y end)
+  const wallT = 0.0025;
 
   return (
     <group position={mid} rotation={euler}>
       {/* Back plate */}
-      <BoxAt pos={[0, 0, -bd * 0.4]} size={[bw, bh, 0.003]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
-      {/* Left side plate */}
-      <BoxAt pos={[-bw * 0.48, 0, -bd * 0.1]} size={[0.003, bh, bd * 0.7]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
-      {/* Right side plate */}
-      <BoxAt pos={[bw * 0.48, 0, -bd * 0.1]} size={[0.003, bh, bd * 0.7]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
-      {/* Bottom plate (scoop) */}
-      <BoxAt pos={[0, -bh * 0.42, 0]} size={[bw * 0.9, 0.003, bd * 0.6]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
-      {/* Cutting edge */}
-      <BoxAt pos={[0, -bh * 0.45, bd * 0.15]} size={[bw * 0.95, 0.004, 0.008]} color={COLORS.cutting} metalness={0.8} roughness={0.2} />
+      <BoxAt pos={[0, 0, -bd * 0.45]} size={[bw, bh, wallT]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
+      {/* Curved bottom (scoop floor) */}
+      <BoxAt pos={[0, -bh * 0.30, -bd * 0.18]} size={[bw - wallT, wallT, bd * 0.55]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} rotation={[0.45, 0, 0]} />
+      {/* Side plates */}
+      <BoxAt pos={[-bw * 0.5 + wallT * 0.5, -bh * 0.05, -bd * 0.08]} size={[wallT, bh * 0.85, bd * 0.85]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
+      <BoxAt pos={[ bw * 0.5 - wallT * 0.5, -bh * 0.05, -bd * 0.08]} size={[wallT, bh * 0.85, bd * 0.85]} color={COLORS.lightSteel} metalness={0.6} roughness={0.4} />
 
-      {/* Teeth (5 teeth) */}
-      {[-0.018, -0.009, 0, 0.009, 0.018].map((offset, i) => (
+      {/* Cutting edge (forward = +Z) */}
+      <BoxAt pos={[0, -bh * 0.48, bd * 0.18]} size={[bw * 0.96, 0.005, 0.010]} color={COLORS.cutting} metalness={0.85} roughness={0.2} />
+
+      {/* GET teeth */}
+      {[-0.022, -0.011, 0, 0.011, 0.022].map((offset, i) => (
         <group key={i}>
-          {/* Tooth adapter */}
           <BoxAt
-            pos={[offset, -bh * 0.47, bd * 0.18]}
-            size={[0.005, 0.006, 0.006]}
+            pos={[offset, -bh * 0.49, bd * 0.21]}
+            size={[0.0055, 0.0065, 0.007]}
             color={COLORS.medSteel}
             metalness={0.7}
             roughness={0.4}
           />
-          {/* Tooth point */}
-          <mesh position={[offset, -bh * 0.50, bd * 0.22]}>
-            <coneGeometry args={[0.003, 0.012, 4]} />
-            <meshStandardMaterial color={COLORS.teeth} metalness={0.8} roughness={0.3} />
+          <mesh position={[offset, -bh * 0.51, bd * 0.265]} rotation={[Math.PI / 2, 0, 0]}>
+            <coneGeometry args={[0.0035, 0.014, 4]} />
+            <meshStandardMaterial color={COLORS.teeth} metalness={0.85} roughness={0.3} />
           </mesh>
         </group>
       ))}
 
-      {/* Soil fill indicator */}
+      {/* Hinge ear at stick joint */}
+      <mesh position={[0, bh * 0.45, 0]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.008, 0.008, bw * 0.7, 10]} />
+        <meshStandardMaterial color={COLORS.medSteel} metalness={0.7} roughness={0.4} />
+      </mesh>
+
+      {/* Soil fill */}
       {fill > 0.05 && (
-        <BoxAt
-          pos={[0, -bh * 0.2, -bd * 0.1]}
-          size={[bw * 0.8 * fill, bh * 0.3 * fill, bd * 0.4 * fill]}
-          color="#6b5a3d"
-          metalness={0.1}
-          roughness={0.95}
-        />
+        <mesh position={[0, -bh * 0.18, -bd * 0.05]}>
+          <boxGeometry args={[bw * 0.85, Math.max(0.005, bh * 0.45 * fill), bd * 0.65 * Math.max(0.4, fill)]} />
+          <meshStandardMaterial color="#6b5a3d" metalness={0.05} roughness={0.95} />
+        </mesh>
       )}
     </group>
   );
 }
 
+// ── Exhaust Smoke Puff ──────────────────────────────────────────────
+// Fading dark puffs anchored to a local position. Intensity 0..1 controls
+// puff spawn rate + size. Smoke rises buoyantly and dissipates.
+function ExhaustSmoke({
+  origin, intensity = 0,
+}: {
+  origin: [number, number, number];
+  intensity?: number;
+}) {
+  const MAX = 24;
+  const meshRef = useRef<THREE.InstancedMesh>(null!);
+  const stateRef = useRef({
+    px: new Float32Array(MAX), py: new Float32Array(MAX), pz: new Float32Array(MAX),
+    vx: new Float32Array(MAX), vy: new Float32Array(MAX), vz: new Float32Array(MAX),
+    life: new Float32Array(MAX), scale: new Float32Array(MAX),
+    cursor: 0, accum: 0,
+  });
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  const mat = useMemo(() => new THREE.MeshStandardMaterial({
+    color: '#1f1f1f', transparent: true, opacity: 0.5,
+    roughness: 1, metalness: 0, depthWrite: false,
+  }), []);
+  const geo = useMemo(() => new THREE.SphereGeometry(0.012, 6, 6), []);
+
+  useFrame((_, dt) => {
+    const s = stateRef.current;
+    const cdt = Math.min(dt, 0.05);
+    const spawnRate = intensity * 16;
+    s.accum += spawnRate * cdt;
+    while (s.accum >= 1 && intensity > 0.02) {
+      s.accum -= 1;
+      const i = s.cursor;
+      s.cursor = (s.cursor + 1) % MAX;
+      s.px[i] = (Math.random() - 0.5) * 0.004;
+      s.py[i] = 0;
+      s.pz[i] = (Math.random() - 0.5) * 0.004;
+      s.vx[i] = (Math.random() - 0.5) * 0.015;
+      s.vy[i] = 0.04 + Math.random() * 0.05 + intensity * 0.04;
+      s.vz[i] = (Math.random() - 0.5) * 0.015;
+      s.life[i] = 1.0;
+      s.scale[i] = 0.4 + Math.random() * 0.5 + intensity * 0.6;
+    }
+    if (!meshRef.current) return;
+    let visible = 0;
+    for (let i = 0; i < MAX; i++) {
+      if (s.life[i] <= 0) continue;
+      s.px[i] += s.vx[i] * cdt;
+      s.py[i] += s.vy[i] * cdt;
+      s.pz[i] += s.vz[i] * cdt;
+      s.vx[i] *= 0.96; s.vz[i] *= 0.96;
+      s.vy[i] += 0.06 * cdt;
+      s.scale[i] += 0.7 * cdt;
+      s.life[i] -= cdt * 0.55;
+      if (s.life[i] <= 0) continue;
+      dummy.position.set(s.px[i], s.py[i], s.pz[i]);
+      const sc = s.scale[i] * (1.4 - s.life[i] * 0.4);
+      dummy.scale.setScalar(sc);
+      dummy.updateMatrix();
+      meshRef.current.setMatrixAt(visible, dummy.matrix);
+      visible++;
+    }
+    meshRef.current.count = visible;
+    meshRef.current.instanceMatrix.needsUpdate = true;
+    mat.opacity = 0.2 + intensity * 0.45;
+  });
+
+  return (
+    <group position={origin}>
+      <instancedMesh ref={meshRef} args={[geo, mat, MAX]} frustumCulled={false} />
+    </group>
+  );
+}
+
 // ── EXCAVATOR ───────────────────────────────────────────────────────
-export function ExcavatorMesh({ state }: { state: ExcavatorState }) {
+export function ExcavatorMesh({
+  state, exhaustIntensity = 0,
+}: { state: ExcavatorState; exhaustIntensity?: number }) {
   const v = state.vehicle;
   const lk = computeExcavatorLocalFK(state);
 
-  // Track dimensions
-  const tw = 0.10;  // track center-to-center
-  const tl = 0.16;  // track length
-  const th = 0.028; // track height
+  // Track dimensions — gauge is chassis-wide spacing between tracks,
+  // shoeWidth is the much narrower individual pad width.
+  const gauge = 0.082;     // center-to-center spacing (was 0.10, too wide)
+  const shoeWidth = 0.032; // realistic ~600mm shoes scaled down
+  const tl = 0.16;         // track length
+  const th = 0.028;        // track height
 
   return (
     <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
       {/* ── Undercarriage ── */}
-      <TrackAssembly side={-1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={5} numPads={42}
+      <TrackAssembly side={-1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={5} numPads={42}
         travel={v.tracks.leftTravel} slack={v.tracks.slack} />
-      <TrackAssembly side={1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={5} numPads={42}
+      <TrackAssembly side={1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={5} numPads={42}
         travel={v.tracks.rightTravel} slack={v.tracks.slack} />
 
-      {/* Track frame cross-members */}
-      <BoxAt pos={[0, -th * 0.3, -tl * 0.25]} size={[tw * 0.6, 0.006, 0.008]} color={COLORS.darkSteel} metalness={0.6} roughness={0.5} />
-      <BoxAt pos={[0, -th * 0.3, tl * 0.25]} size={[tw * 0.6, 0.006, 0.008]} color={COLORS.darkSteel} metalness={0.6} roughness={0.5} />
+      {/* Track frame cross-members (span between the two tracks) */}
+      <BoxAt pos={[0, -th * 0.05, -tl * 0.25]} size={[gauge * 0.7, 0.006, 0.008]} color={COLORS.darkSteel} metalness={0.6} roughness={0.5} />
+      <BoxAt pos={[0, -th * 0.05, tl * 0.25]} size={[gauge * 0.7, 0.006, 0.008]} color={COLORS.darkSteel} metalness={0.6} roughness={0.5} />
 
+      {/* Keep tw alias for downstream layout below */}
+      {(() => { /* no-op */ return null; })()}
       {/* Center platform / turntable ring */}
       <mesh position={[0, 0.005, 0]}>
         <cylinderGeometry args={[0.035, 0.038, 0.008, 16]} />
@@ -515,6 +610,8 @@ export function ExcavatorMesh({ state }: { state: ExcavatorState }) {
           <cylinderGeometry args={[0.005, 0.005, 0.003, 8]} />
           <meshStandardMaterial color={COLORS.exhaust} metalness={0.6} roughness={0.5} />
         </mesh>
+        {/* Exhaust smoke puffs (rises from cap) */}
+        <ExhaustSmoke origin={[0.022, 0.082, -0.035]} intensity={exhaustIntensity} />
 
         {/* Cab structure */}
         {/* Cab floor */}
@@ -637,13 +734,18 @@ export function ExcavatorMesh({ state }: { state: ExcavatorState }) {
 }
 
 // ── BULLDOZER ───────────────────────────────────────────────────────
-export function BulldozerMesh({ state }: { state: BulldozerState }) {
+export function BulldozerMesh({
+  state, exhaustIntensity = 0,
+}: { state: BulldozerState; exhaustIntensity?: number }) {
   const v = state.vehicle;
 
-  // Track dimensions (bulldozer is wider/longer than excavator)
-  const tw = 0.13;  // track center-to-center
-  const tl = 0.20;  // track length
-  const th = 0.032; // track height
+  // Track dimensions — gauge narrower than before; shoe width represents
+  // wide D6-style grouser shoes (~600mm scaled). `tw` kept as alias.
+  const gauge = 0.105;       // center-to-center spacing (was 0.13)
+  const shoeWidth = 0.040;
+  const tw = gauge;          // alias for downstream layout (push arms etc.)
+  const tl = 0.20;           // track length
+  const th = 0.032;          // track height
 
   // Blade geometry in local space
   const bladeW = state.bladeWidth;
@@ -653,15 +755,15 @@ export function BulldozerMesh({ state }: { state: BulldozerState }) {
   return (
     <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
       {/* ── Undercarriage ── */}
-      <TrackAssembly side={-1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={7} numPads={52}
+      <TrackAssembly side={-1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={7} numPads={52}
         travel={v.tracks.leftTravel} slack={v.tracks.slack} />
-      <TrackAssembly side={1} trackWidth={tw} trackLength={tl} trackHeight={th} numRollers={7} numPads={52}
+      <TrackAssembly side={1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={7} numPads={52}
         travel={v.tracks.rightTravel} slack={v.tracks.slack} />
 
       {/* Track frame cross-members */}
-      <BoxAt pos={[0, -th * 0.3, -tl * 0.3]} size={[tw * 0.5, 0.008, 0.01]} color={COLORS.darkSteel} />
-      <BoxAt pos={[0, -th * 0.3, 0]} size={[tw * 0.5, 0.008, 0.01]} color={COLORS.darkSteel} />
-      <BoxAt pos={[0, -th * 0.3, tl * 0.3]} size={[tw * 0.5, 0.008, 0.01]} color={COLORS.darkSteel} />
+      <BoxAt pos={[0, -th * 0.05, -tl * 0.3]} size={[gauge * 0.6, 0.008, 0.01]} color={COLORS.darkSteel} />
+      <BoxAt pos={[0, -th * 0.05, 0]} size={[gauge * 0.6, 0.008, 0.01]} color={COLORS.darkSteel} />
+      <BoxAt pos={[0, -th * 0.05, tl * 0.3]} size={[gauge * 0.6, 0.008, 0.01]} color={COLORS.darkSteel} />
 
       {/* ── Main body / engine deck ── */}
       <BoxAt pos={[0, 0.02, -0.02]} size={[0.09, 0.025, 0.14]} color={COLORS.catYellow} />
@@ -695,6 +797,8 @@ export function BulldozerMesh({ state }: { state: BulldozerState }) {
         <cylinderGeometry args={[0.006, 0.006, 0.003, 8]} />
         <meshStandardMaterial color={COLORS.exhaust} metalness={0.6} roughness={0.5} />
       </mesh>
+      {/* Exhaust smoke puffs */}
+      <ExhaustSmoke origin={[-0.035, 0.102, -0.05]} intensity={exhaustIntensity} />
 
       {/* Air pre-cleaner (right side) */}
       <mesh position={[0.035, 0.075, -0.05]}>

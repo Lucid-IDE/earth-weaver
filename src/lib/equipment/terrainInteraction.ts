@@ -222,9 +222,9 @@ interface TerrainFollowConfig {
 }
 
 const DEFAULT_FOLLOW_CONFIG: TerrainFollowConfig = {
-  trackWidth: 0.09,
+  trackWidth: 0.082,
   trackLength: 0.16,
-  rideHeight: 0.025,  // th * 0.88
+  rideHeight: 0.014,  // matches renderer: trackHeight * 0.50
   loadFactor: 1,
   followSharpness: 0.55,
   maxDropSpeed: 0.6,
@@ -348,11 +348,12 @@ export function updateVehicleTerrainFollow(
   // This prevents the machine from sinking into uneven terrain
   const contactYs = surfaceYs.map((y, i) => y - sinkYs[i]);
 
-  // For Y: use a weighted approach — mostly highest point, slightly avg to prevent hovering
+  // For Y: weight toward AVERAGE rather than max so the machine sits
+  // properly bedded on uneven terrain instead of teetering on the highest
+  // contact point. Slight max-bias prevents sinking into small dips.
   const maxContact = Math.max(...contactYs);
   const avgContact = contactYs.reduce((a, b) => a + b, 0) / contactYs.length;
-  // Blend: 70% max (prevents sinking), 30% avg (prevents hovering over bumps)
-  const blendedY = maxContact * 0.6 + avgContact * 0.4;
+  const blendedY = maxContact * 0.30 + avgContact * 0.70;
   const targetY = blendedY + cfg.rideHeight;
 
   // Stiff spring going UP (ground pushes vehicle up instantly)
