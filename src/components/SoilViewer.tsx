@@ -637,6 +637,8 @@ function SoilTerrain({
     impactMode: null as string | null,
     excPhysics: createVehiclePhysics(createExcavatorMass(), 1.8, 2200),
     dozPhysics: createVehiclePhysics(createBulldozerMass(), 2.2, 2100),
+    excDrop: createSpawnDrop(0.16),
+    dozDrop: createSpawnDrop(0.18),
   });
 
   const material = useMemo(() => new THREE.ShaderMaterial({
@@ -693,7 +695,7 @@ function SoilTerrain({
     fieldRef.current = field;
     simRef.current = new SoilSimulator(field);
 
-    // Snap both vehicles onto terrain surface immediately
+    // Snap both vehicles onto terrain surface, then lift up for spawn drop
     const es = equipmentState.current;
     initVehicleOnTerrain(es.excavator.vehicle, field, {
       trackWidth: 0.10, trackLength: 0.16, rideHeight: 0.025,
@@ -701,6 +703,10 @@ function SoilTerrain({
     initVehicleOnTerrain(es.bulldozer.vehicle, field, {
       trackWidth: 0.13, trackLength: 0.20, rideHeight: 0.028,
     });
+    elevateForSpawn(es.excavator.vehicle, field, es.excDrop, 0.025);
+    elevateForSpawn(es.bulldozer.vehicle, field, es.dozDrop, 0.028);
+    es.excDrop.onLanding = (intensity) => playLandingThump(intensity);
+    es.dozDrop.onLanding = (intensity) => playLandingThump(intensity);
 
     rebuildMesh();
   }, [rebuildMesh]);
