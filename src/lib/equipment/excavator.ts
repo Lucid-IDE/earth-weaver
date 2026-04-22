@@ -196,9 +196,7 @@ export function updateExcavator(
   );
   state.hydraulicPressure += (peakP - state.hydraulicPressure) * Math.min(1, 8 * dt);
 
-  // NOTE: Track drive is handled by vehiclePhysics.updateVehiclePhysics()
-  state.vehicle.tracks.leftSpeed = inputs.leftTrack;
-  state.vehicle.tracks.rightSpeed = inputs.rightTrack;
+  // NOTE: Track drive visuals are authored by vehiclePhysics.updateVehiclePhysics().
 }
 
 // ── World-space FK (for terrain interaction) ────────────────────────
