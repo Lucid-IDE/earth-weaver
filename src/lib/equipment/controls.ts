@@ -65,8 +65,10 @@ const justPressed: Record<string, boolean> = {};
 
 export function initControls() {
   window.addEventListener('keydown', (e) => {
-    const key = e.key.toLowerCase() === e.key ? e.key : e.key;
     const k = e.code || e.key.toLowerCase();
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(k)) {
+      e.preventDefault();
+    }
     if (!keyState[k]) {
       justPressed[k] = true;
     }
@@ -75,6 +77,9 @@ export function initControls() {
   
   window.addEventListener('keyup', (e) => {
     const k = e.code || e.key.toLowerCase();
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(k)) {
+      e.preventDefault();
+    }
     keyState[k] = false;
   });
 }
