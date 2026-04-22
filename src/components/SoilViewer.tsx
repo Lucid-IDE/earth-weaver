@@ -681,7 +681,8 @@ function SoilTerrain({
   const fieldRef = useRef<VoxelField | null>(null);
   const simRef = useRef<SoilSimulator | null>(null);
   const meshFrameRef = useRef(0);
-  const settleDetector = useRef(createSettleDetector('soil-terrain'));
+  const hudTickRef = useRef(0);
+  const statsTickRef = useRef(0);
   
   const equipmentState = useRef({
     activeEquipment: 'none' as EquipmentType,
@@ -786,6 +787,9 @@ function SoilTerrain({
     material.uniforms.uTime.value += dt;
 
     const sim = simRef.current;
+    statsTickRef.current += dt;
+    hudTickRef.current += dt;
+
     if (sim && sim.simActive) {
       const changed = sim.step(dt);
       if (changed) {
@@ -794,22 +798,29 @@ function SoilTerrain({
           rebuildMesh();
         }
       }
+    }
+
+    const statsInterval = sim?.simActive ? 0.12 : 0.35;
+    if (statsTickRef.current >= statsInterval) {
+      statsTickRef.current = 0;
       onStats({
         vertices: meshRef.current?.geometry?.attributes?.position?.count ?? 0,
         triangles: (meshRef.current?.geometry?.index?.count ?? 0) / 3,
-        simActive: sim.simActive,
-        activeParticles: sim.getActiveParticles(),
-        totalParticles: sim.mpm.numParticles,
+        simActive: sim?.simActive ?? false,
+        activeParticles: sim?.getActiveParticles() ?? 0,
+        totalParticles: sim?.mpm.numParticles ?? 0,
       });
     }
     
-    // Update equipment stats for HUD
-    onEquipmentUpdate({
-      activeEquipment: equipmentState.current.activeEquipment,
-      excavator: equipmentState.current.excavator,
-      bulldozer: equipmentState.current.bulldozer,
-      impactMode: equipmentState.current.impactMode,
-    });
+    if (hudTickRef.current >= 1 / 12) {
+      hudTickRef.current = 0;
+      onEquipmentUpdate({
+        activeEquipment: equipmentState.current.activeEquipment,
+        excavator: equipmentState.current.excavator,
+        bulldozer: equipmentState.current.bulldozer,
+        impactMode: equipmentState.current.impactMode,
+      });
+    }
   });
 
   return (
@@ -827,7 +838,7 @@ function SoilTerrain({
   );
 }
 
-export default function SoilViewer({ 
+export default memo(function SoilViewer({ 
   onStats, 
   onEquipmentUpdate,
 }: { 
@@ -840,8 +851,9 @@ export default function SoilViewer({
   
   return (
     <Canvas
+      dpr={[1, 1]}
       camera={{ position: [0.9, 0.5, 0.9], fov: 42, near: 0.005, far: 10 }}
-      gl={{ antialias: true }}
+      gl={{ antialias: false, alpha: false, powerPreference: 'high-performance', stencil: false }}
       style={{ width: '100%', height: '100%' }}
     >
       <color attach="background" args={['#080c12']} />
@@ -858,4 +870,4 @@ export default function SoilViewer({
       />
     </Canvas>
   );
-}
+})
