@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo, useState } from 'react';
+import { memo, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, ThreeEvent, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
@@ -8,7 +8,7 @@ import { soilVertexShader, soilFragmentShader } from '@/lib/soil/soilShader';
 import { DIG_RADIUS } from '@/lib/soil/constants';
 import { getMaterialAt } from '@/lib/soil/materialBrain';
 import { mpmToWorld } from '@/lib/mpm/bridge';
-import { triggerAutoCapture, createSettleDetector } from '@/lib/analyst/autoCapture';
+import { triggerAutoCapture } from '@/lib/analyst/autoCapture';
 import {
   dustVertexShader,
   dustFragmentShader,
@@ -79,12 +79,13 @@ const MATERIAL_BASE_COLORS = [
 
 // ── Screen-Space Fluid Renderer ─────────────────────────────────────
 function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | null> }) {
-  const MAX_PARTICLES_RENDER = 131072;
+  const MAX_PARTICLES_RENDER = 32768;
+  const RENDER_SCALE = 0.5;
   const { gl, camera, size } = useThree();
   
   const resources = useMemo(() => {
-    const w = Math.max(size.width, 1);
-    const h = Math.max(size.height, 1);
+    const w = Math.max(Math.floor(size.width * RENDER_SCALE), 1);
+    const h = Math.max(Math.floor(size.height * RENDER_SCALE), 1);
     
     const depthTarget = new THREE.WebGLRenderTarget(w, h, {
       minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
@@ -201,8 +202,8 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
   }, []);
   
   useEffect(() => {
-    const w = Math.max(size.width, 1);
-    const h = Math.max(size.height, 1);
+    const w = Math.max(Math.floor(size.width * RENDER_SCALE), 1);
+    const h = Math.max(Math.floor(size.height * RENDER_SCALE), 1);
     resources.depthTarget.setSize(w, h);
     resources.filterTargetH.setSize(w, h);
     resources.filterTargetV.setSize(w, h);
@@ -363,7 +364,8 @@ function DustCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | 
     }
     ds.lastParticleCount = currentCount;
     
-    for (let i = 0; i < mpm.numParticles; i++) {
+    const sampleStride = Math.max(1, Math.floor(mpm.numParticles / 768));
+    for (let i = 0; i < mpm.numParticles; i += sampleStride) {
       if (!mpm.active[i]) continue;
       const speed = Math.sqrt(mpm.vx[i]**2 + mpm.vy[i]**2 + mpm.vz[i]**2);
       if (speed > 0.3 && rng() < 0.05) {
@@ -679,7 +681,8 @@ function SoilTerrain({
   const fieldRef = useRef<VoxelField | null>(null);
   const simRef = useRef<SoilSimulator | null>(null);
   const meshFrameRef = useRef(0);
-  const settleDetector = useRef(createSettleDetector('soil-terrain'));
+  const hudTickRef = useRef(0);
+  const statsTickRef = useRef(0);
   
   const equipmentState = useRef({
     activeEquipment: 'none' as EquipmentType,
@@ -784,6 +787,9 @@ function SoilTerrain({
     material.uniforms.uTime.value += dt;
 
     const sim = simRef.current;
+    statsTickRef.current += dt;
+    hudTickRef.current += dt;
+
     if (sim && sim.simActive) {
       const changed = sim.step(dt);
       if (changed) {
@@ -792,22 +798,29 @@ function SoilTerrain({
           rebuildMesh();
         }
       }
+    }
+
+    const statsInterval = sim?.simActive ? 0.12 : 0.35;
+    if (statsTickRef.current >= statsInterval) {
+      statsTickRef.current = 0;
       onStats({
         vertices: meshRef.current?.geometry?.attributes?.position?.count ?? 0,
         triangles: (meshRef.current?.geometry?.index?.count ?? 0) / 3,
-        simActive: sim.simActive,
-        activeParticles: sim.getActiveParticles(),
-        totalParticles: sim.mpm.numParticles,
+        simActive: sim?.simActive ?? false,
+        activeParticles: sim?.getActiveParticles() ?? 0,
+        totalParticles: sim?.mpm.numParticles ?? 0,
       });
     }
     
-    // Update equipment stats for HUD
-    onEquipmentUpdate({
-      activeEquipment: equipmentState.current.activeEquipment,
-      excavator: equipmentState.current.excavator,
-      bulldozer: equipmentState.current.bulldozer,
-      impactMode: equipmentState.current.impactMode,
-    });
+    if (hudTickRef.current >= 1 / 12) {
+      hudTickRef.current = 0;
+      onEquipmentUpdate({
+        activeEquipment: equipmentState.current.activeEquipment,
+        excavator: equipmentState.current.excavator,
+        bulldozer: equipmentState.current.bulldozer,
+        impactMode: equipmentState.current.impactMode,
+      });
+    }
   });
 
   return (
@@ -825,7 +838,7 @@ function SoilTerrain({
   );
 }
 
-export default function SoilViewer({ 
+export default memo(function SoilViewer({ 
   onStats, 
   onEquipmentUpdate,
 }: { 
@@ -838,8 +851,9 @@ export default function SoilViewer({
   
   return (
     <Canvas
+      dpr={[1, 1]}
       camera={{ position: [0.9, 0.5, 0.9], fov: 42, near: 0.005, far: 10 }}
-      gl={{ antialias: true }}
+      gl={{ antialias: false, alpha: false, powerPreference: 'high-performance', stencil: false }}
       style={{ width: '100%', height: '100%' }}
     >
       <color attach="background" args={['#080c12']} />
@@ -856,4 +870,4 @@ export default function SoilViewer({
       />
     </Canvas>
   );
-}
+})

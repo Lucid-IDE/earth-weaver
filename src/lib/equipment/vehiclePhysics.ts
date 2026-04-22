@@ -316,10 +316,11 @@ export function updateVehiclePhysics(
   const demandMagnitude = Math.max(Math.abs(leftInput), Math.abs(rightInput));
   eng.targetThrottle = Math.min(1, demandMagnitude + hydraulicDemand * 0.4);
 
-  const totalLoad = Math.abs(physics.forwardVelocity) * mass.mass * 10 + physics.hydraulics.pumpLoad;
-  updateEngine(eng, totalLoad, dt_clamped);
-
   updateHydraulicSystem(physics.hydraulics, eng, hydraulicDemand, dt_clamped);
+
+  const tractionLoad = Math.abs(physics.forwardVelocity) * mass.mass * 3.5;
+  const totalLoad = tractionLoad + physics.hydraulics.pumpLoad * 0.45;
+  updateEngine(eng, totalLoad, dt_clamped);
 
   const speedRatio = Math.min(1, Math.abs(physics.forwardVelocity) * 40);
   drv.converterSlip = Math.max(0.05, 1 - speedRatio * 0.85);
@@ -335,16 +336,17 @@ export function updateVehiclePhysics(
   drv.rightBrake = 0;
   if (leftInput * drv.leftTrackVelocity < -0.001) drv.leftBrake = 0.7;
   if (rightInput * drv.rightTrackVelocity < -0.001) drv.rightBrake = 0.7;
-  if (Math.abs(leftInput) < 0.05) drv.leftBrake = 0.3;
-  if (Math.abs(rightInput) < 0.05) drv.rightBrake = 0.3;
+  if (Math.abs(leftInput) < 0.05) drv.leftBrake = 0.18;
+  if (Math.abs(rightInput) < 0.05) drv.rightBrake = 0.18;
 
-  const maxTrackSpeed = 0.12;
-  const driveGain = 0.0009;
-  const cmdLeftV = drv.leftDriveTorque * driveGain - drv.leftBrake * Math.sign(drv.leftTrackVelocity) * 0.04;
-  const cmdRightV = drv.rightDriveTorque * driveGain - drv.rightBrake * Math.sign(drv.rightTrackVelocity) * 0.04;
+  const maxTrackSpeed = 0.26;
+  const driveGain = 0.0024;
+  const brakeGain = 0.028;
+  const cmdLeftV = drv.leftDriveTorque * driveGain - drv.leftBrake * Math.sign(drv.leftTrackVelocity || leftInput || 1) * brakeGain;
+  const cmdRightV = drv.rightDriveTorque * driveGain - drv.rightBrake * Math.sign(drv.rightTrackVelocity || rightInput || 1) * brakeGain;
 
-  drv.leftTrackVelocity += (cmdLeftV - drv.leftTrackVelocity) * Math.min(1, 6 * dt_clamped);
-  drv.rightTrackVelocity += (cmdRightV - drv.rightTrackVelocity) * Math.min(1, 6 * dt_clamped);
+  drv.leftTrackVelocity += (cmdLeftV - drv.leftTrackVelocity) * Math.min(1, 9 * dt_clamped);
+  drv.rightTrackVelocity += (cmdRightV - drv.rightTrackVelocity) * Math.min(1, 9 * dt_clamped);
   drv.leftTrackVelocity = Math.max(-maxTrackSpeed, Math.min(maxTrackSpeed, drv.leftTrackVelocity));
   drv.rightTrackVelocity = Math.max(-maxTrackSpeed, Math.min(maxTrackSpeed, drv.rightTrackVelocity));
 
@@ -377,19 +379,19 @@ export function updateVehiclePhysics(
 
   const totalThrust = leftRes.thrust + rightRes.thrust;
   const totalResistance = leftRes.resistance + rightRes.resistance;
-  const slopeForce = -Math.sin(vehicle.pitch) * mass.mass * 9.81 * 0.6;
-  const dragForce = -physics.forwardVelocity * mass.mass * 0.6;
+  const slopeForce = -Math.sin(vehicle.pitch) * mass.mass * 9.81 * 0.28;
+  const dragForce = -physics.forwardVelocity * mass.mass * 0.32;
 
   const netLongForce = totalThrust - Math.sign(physics.forwardVelocity) * totalResistance + slopeForce + dragForce;
-  const accel = netLongForce / Math.max(1, mass.mass * 60);
+  const accel = netLongForce / Math.max(1, mass.mass * 22);
   physics.forwardVelocity += accel * dt_clamped;
 
-  const vMaxChassis = 0.10;
+  const vMaxChassis = 0.18;
   physics.forwardVelocity = Math.max(-vMaxChassis, Math.min(vMaxChassis, physics.forwardVelocity));
 
   const turnDiff = (drv.rightTrackVelocity - drv.leftTrackVelocity) / mass.trackWidth;
-  const targetAngVel = turnDiff * 0.55;
-  const angAccel = (targetAngVel - physics.angularVelocity) * 8;
+  const targetAngVel = turnDiff * 0.68;
+  const angAccel = (targetAngVel - physics.angularVelocity) * 10;
   physics.angularVelocity += angAccel * dt_clamped;
   physics.angularVelocity *= (1 - 2.4 * dt_clamped);
 
