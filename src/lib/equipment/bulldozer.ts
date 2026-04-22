@@ -71,9 +71,6 @@ export function updateBulldozer(
   },
   hydraulics?: HydraulicSystem | null,
 ) {
-  state.vehicle.tracks.leftSpeed = inputs.leftTrack;
-  state.vehicle.tracks.rightSpeed = inputs.rightTrack;
-
   if (hydraulics) {
     // Blade lift: cylinder velocity directly drives blade height (1:1 scale)
     stepCylinder(

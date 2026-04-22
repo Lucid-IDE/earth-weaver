@@ -484,7 +484,7 @@ function ExhaustSmoke({
   origin: [number, number, number];
   intensity?: number;
 }) {
-  const MAX = 24;
+  const MAX = 10;
   const meshRef = useRef<THREE.InstancedMesh>(null!);
   const stateRef = useRef({
     px: new Float32Array(MAX), py: new Float32Array(MAX), pz: new Float32Array(MAX),
@@ -493,16 +493,16 @@ function ExhaustSmoke({
     cursor: 0, accum: 0,
   });
   const dummy = useMemo(() => new THREE.Object3D(), []);
-  const mat = useMemo(() => new THREE.MeshStandardMaterial({
+  const mat = useMemo(() => new THREE.MeshBasicMaterial({
     color: '#1f1f1f', transparent: true, opacity: 0.5,
-    roughness: 1, metalness: 0, depthWrite: false,
+    depthWrite: false,
   }), []);
-  const geo = useMemo(() => new THREE.SphereGeometry(0.012, 6, 6), []);
+  const geo = useMemo(() => new THREE.SphereGeometry(0.012, 4, 4), []);
 
   useFrame((_, dt) => {
     const s = stateRef.current;
     const cdt = Math.min(dt, 0.05);
-    const spawnRate = intensity * 16;
+    const spawnRate = intensity * 8;
     s.accum += spawnRate * cdt;
     while (s.accum >= 1 && intensity > 0.02) {
       s.accum -= 1;
@@ -515,7 +515,7 @@ function ExhaustSmoke({
       s.vy[i] = 0.04 + Math.random() * 0.05 + intensity * 0.04;
       s.vz[i] = (Math.random() - 0.5) * 0.015;
       s.life[i] = 1.0;
-      s.scale[i] = 0.4 + Math.random() * 0.5 + intensity * 0.6;
+      s.scale[i] = 0.35 + Math.random() * 0.35 + intensity * 0.45;
     }
     if (!meshRef.current) return;
     let visible = 0;
@@ -565,9 +565,9 @@ export function ExcavatorMesh({
   return (
     <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
       {/* ── Undercarriage ── */}
-      <TrackAssembly side={-1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={5} numPads={42}
+      <TrackAssembly side={-1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={5} numPads={24}
         travel={v.tracks.leftTravel} slack={v.tracks.slack} />
-      <TrackAssembly side={1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={5} numPads={42}
+      <TrackAssembly side={1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={5} numPads={24}
         travel={v.tracks.rightTravel} slack={v.tracks.slack} />
 
       {/* Track frame cross-members (span between the two tracks) */}
@@ -755,9 +755,9 @@ export function BulldozerMesh({
   return (
     <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
       {/* ── Undercarriage ── */}
-      <TrackAssembly side={-1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={7} numPads={52}
+      <TrackAssembly side={-1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={7} numPads={32}
         travel={v.tracks.leftTravel} slack={v.tracks.slack} />
-      <TrackAssembly side={1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={7} numPads={52}
+      <TrackAssembly side={1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={7} numPads={32}
         travel={v.tracks.rightTravel} slack={v.tracks.slack} />
 
       {/* Track frame cross-members */}
