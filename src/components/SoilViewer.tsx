@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo, useState } from 'react';
+import { memo, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, ThreeEvent, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
@@ -8,7 +8,7 @@ import { soilVertexShader, soilFragmentShader } from '@/lib/soil/soilShader';
 import { DIG_RADIUS } from '@/lib/soil/constants';
 import { getMaterialAt } from '@/lib/soil/materialBrain';
 import { mpmToWorld } from '@/lib/mpm/bridge';
-import { triggerAutoCapture, createSettleDetector } from '@/lib/analyst/autoCapture';
+import { triggerAutoCapture } from '@/lib/analyst/autoCapture';
 import {
   dustVertexShader,
   dustFragmentShader,
@@ -79,12 +79,13 @@ const MATERIAL_BASE_COLORS = [
 
 // ── Screen-Space Fluid Renderer ─────────────────────────────────────
 function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | null> }) {
-  const MAX_PARTICLES_RENDER = 131072;
+  const MAX_PARTICLES_RENDER = 32768;
+  const RENDER_SCALE = 0.5;
   const { gl, camera, size } = useThree();
   
   const resources = useMemo(() => {
-    const w = Math.max(size.width, 1);
-    const h = Math.max(size.height, 1);
+    const w = Math.max(Math.floor(size.width * RENDER_SCALE), 1);
+    const h = Math.max(Math.floor(size.height * RENDER_SCALE), 1);
     
     const depthTarget = new THREE.WebGLRenderTarget(w, h, {
       minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
@@ -201,8 +202,8 @@ function FluidRenderer({ simRef }: { simRef: React.MutableRefObject<SoilSimulato
   }, []);
   
   useEffect(() => {
-    const w = Math.max(size.width, 1);
-    const h = Math.max(size.height, 1);
+    const w = Math.max(Math.floor(size.width * RENDER_SCALE), 1);
+    const h = Math.max(Math.floor(size.height * RENDER_SCALE), 1);
     resources.depthTarget.setSize(w, h);
     resources.filterTargetH.setSize(w, h);
     resources.filterTargetV.setSize(w, h);
@@ -363,7 +364,8 @@ function DustCloud({ simRef }: { simRef: React.MutableRefObject<SoilSimulator | 
     }
     ds.lastParticleCount = currentCount;
     
-    for (let i = 0; i < mpm.numParticles; i++) {
+    const sampleStride = Math.max(1, Math.floor(mpm.numParticles / 768));
+    for (let i = 0; i < mpm.numParticles; i += sampleStride) {
       if (!mpm.active[i]) continue;
       const speed = Math.sqrt(mpm.vx[i]**2 + mpm.vy[i]**2 + mpm.vz[i]**2);
       if (speed > 0.3 && rng() < 0.05) {
