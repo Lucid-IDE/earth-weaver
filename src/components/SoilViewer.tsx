@@ -689,8 +689,8 @@ function SoilTerrain({
     excavator: createExcavatorState(),
     bulldozer: createBulldozerState(),
     impactMode: null as string | null,
-    excPhysics: createVehiclePhysics(createExcavatorMass(), 1.8, 2200),
-    dozPhysics: createVehiclePhysics(createBulldozerMass(), 2.2, 2100),
+    excPhysics: createVehiclePhysics(createExcavatorMass(), 7.5, 2200),
+    dozPhysics: createVehiclePhysics(createBulldozerMass(), 9.0, 2100),
     excDrop: createSpawnDrop(0.16),
     dozDrop: createSpawnDrop(0.18),
   });
