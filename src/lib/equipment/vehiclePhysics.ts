@@ -213,7 +213,8 @@ export function createDrivetrain(): DrivetrainState {
 export interface MassProperties {
   mass: number;
   momentOfInertia: number;
-  trackWidth: number;
+  trackGauge: number;
+  shoeWidth: number;
   trackLength: number;
   groundPressure: number;
   cg: [number, number, number];
@@ -224,7 +225,8 @@ export function createExcavatorMass(): MassProperties {
   return {
     mass: 20,
     momentOfInertia: 2.5,
-    trackWidth: 0.10,
+    trackGauge: 0.082,
+    shoeWidth: 0.032,
     trackLength: 0.16,
     groundPressure: 0.45,
     cg: [0, 0.03, 0],
@@ -236,7 +238,8 @@ export function createBulldozerMass(): MassProperties {
   return {
     mass: 22,
     momentOfInertia: 3.2,
-    trackWidth: 0.13,
+    trackGauge: 0.105,
+    shoeWidth: 0.040,
     trackLength: 0.20,
     groundPressure: 0.38,
     cg: [0, 0.025, -0.01],
@@ -339,14 +342,14 @@ export function updateVehiclePhysics(
   if (Math.abs(leftInput) < 0.05) drv.leftBrake = 0.18;
   if (Math.abs(rightInput) < 0.05) drv.rightBrake = 0.18;
 
-  const maxTrackSpeed = 0.26;
-  const driveGain = 0.0024;
-  const brakeGain = 0.028;
+  const maxTrackSpeed = 0.24;
+  const driveGain = 0.0065;
+  const brakeGain = 0.014;
   const cmdLeftV = drv.leftDriveTorque * driveGain - drv.leftBrake * Math.sign(drv.leftTrackVelocity || leftInput || 1) * brakeGain;
   const cmdRightV = drv.rightDriveTorque * driveGain - drv.rightBrake * Math.sign(drv.rightTrackVelocity || rightInput || 1) * brakeGain;
 
-  drv.leftTrackVelocity += (cmdLeftV - drv.leftTrackVelocity) * Math.min(1, 9 * dt_clamped);
-  drv.rightTrackVelocity += (cmdRightV - drv.rightTrackVelocity) * Math.min(1, 9 * dt_clamped);
+  drv.leftTrackVelocity += (cmdLeftV - drv.leftTrackVelocity) * Math.min(1, 12 * dt_clamped);
+  drv.rightTrackVelocity += (cmdRightV - drv.rightTrackVelocity) * Math.min(1, 12 * dt_clamped);
   drv.leftTrackVelocity = Math.max(-maxTrackSpeed, Math.min(maxTrackSpeed, drv.leftTrackVelocity));
   drv.rightTrackVelocity = Math.max(-maxTrackSpeed, Math.min(maxTrackSpeed, drv.rightTrackVelocity));
 
@@ -356,15 +359,15 @@ export function updateVehiclePhysics(
   const halfWeight = mass.mass * 9.81 * 0.5;
   const leftLoad = halfWeight - pitchTransfer * 0.5;
   const rightLoad = halfWeight - pitchTransfer * 0.5;
-  const shoeArea = mass.trackWidth * mass.trackLength;
+  const shoeArea = mass.shoeWidth * mass.trackLength;
 
   const leftRes = computeTrackForces(
-    leftLoad, shoeArea, mass.trackWidth, mass.trackLength,
+    leftLoad, shoeArea, mass.shoeWidth, mass.trackLength,
     drv.leftTrackVelocity, physics.forwardVelocity,
     dt_clamped, params, physics.leftShearJ,
   );
   const rightRes = computeTrackForces(
-    rightLoad, shoeArea, mass.trackWidth, mass.trackLength,
+    rightLoad, shoeArea, mass.shoeWidth, mass.trackLength,
     drv.rightTrackVelocity, physics.forwardVelocity,
     dt_clamped, params, physics.rightShearJ,
   );
@@ -379,17 +382,17 @@ export function updateVehiclePhysics(
 
   const totalThrust = leftRes.thrust + rightRes.thrust;
   const totalResistance = leftRes.resistance + rightRes.resistance;
-  const slopeForce = -Math.sin(vehicle.pitch) * mass.mass * 9.81 * 0.28;
-  const dragForce = -physics.forwardVelocity * mass.mass * 0.32;
+  const slopeForce = -Math.sin(vehicle.pitch) * mass.mass * 9.81 * 0.22;
+  const dragForce = -physics.forwardVelocity * mass.mass * 0.20;
 
   const netLongForce = totalThrust - Math.sign(physics.forwardVelocity) * totalResistance + slopeForce + dragForce;
-  const accel = netLongForce / Math.max(1, mass.mass * 22);
+  const accel = netLongForce / Math.max(1, mass.mass * 14);
   physics.forwardVelocity += accel * dt_clamped;
 
-  const vMaxChassis = 0.18;
+  const vMaxChassis = 0.22;
   physics.forwardVelocity = Math.max(-vMaxChassis, Math.min(vMaxChassis, physics.forwardVelocity));
 
-  const turnDiff = (drv.rightTrackVelocity - drv.leftTrackVelocity) / mass.trackWidth;
+  const turnDiff = (drv.rightTrackVelocity - drv.leftTrackVelocity) / mass.trackGauge;
   const targetAngVel = turnDiff * 0.68;
   const angAccel = (targetAngVel - physics.angularVelocity) * 10;
   physics.angularVelocity += angAccel * dt_clamped;
