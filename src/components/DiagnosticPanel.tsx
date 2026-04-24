@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { telemetryBus, TelemetryFrame } from '@/lib/diagnostics/telemetryBus';
 import { DiagnosticTestRunner, TestResult, TestSuiteState } from '@/lib/diagnostics/selfTest';
+import { MPM_RUNTIME } from '@/lib/soil/soilSim';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 
@@ -12,6 +13,7 @@ export default function DiagnosticPanel({ open, onClose }: { open: boolean; onCl
   const [suite, setSuite] = useState<TestSuiteState>({ results: [], running: false, current: null });
   const [aiBusy, setAiBusy] = useState(false);
   const [aiText, setAiText] = useState<string>('');
+  const [mpmOn, setMpmOn] = useState(MPM_RUNTIME.enabled);
   const [openSection, setOpenSection] = useState<Record<string, boolean>>({
     input: true, drive: true, joints: true, render: true, tests: true, ai: true,
   });
@@ -94,12 +96,21 @@ export default function DiagnosticPanel({ open, onClose }: { open: boolean; onCl
         </Button>
       </div>
 
-      <div className="flex gap-2 px-3 py-2 border-b border-border">
-        <Button size="sm" onClick={runTests} disabled={suite.running} className="gap-1.5 flex-1">
+      <div className="flex flex-wrap gap-2 px-3 py-2 border-b border-border">
+        <Button size="sm" onClick={runTests} disabled={suite.running} className="gap-1.5 flex-1 min-w-[140px]">
           <Play className="h-3 w-3" /> {suite.running ? `Running… ${suite.current ?? ''}` : 'Run All Tests'}
         </Button>
         <Button size="sm" variant="outline" onClick={askAI} disabled={aiBusy || !frame} className="gap-1.5">
           <Brain className="h-3 w-3" /> {aiBusy ? '…' : 'AI Diagnose'}
+        </Button>
+        <Button
+          size="sm"
+          variant={mpmOn ? 'default' : 'outline'}
+          onClick={() => { MPM_RUNTIME.enabled = !MPM_RUNTIME.enabled; setMpmOn(MPM_RUNTIME.enabled); }}
+          className="gap-1.5"
+          title="Toggle MLS-MPM particle solver"
+        >
+          MPM: {mpmOn ? 'ON' : 'OFF'}
         </Button>
       </div>
 

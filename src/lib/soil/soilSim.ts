@@ -16,6 +16,18 @@ import { MPM_DT, MPM_STEPS_PER_FRAME } from '../mpm/constants';
 
 const MAX_PARTICLE_LIFETIME = 300; // frames before forced deposit
 
+// Global runtime toggle — MPM solver disabled by default while we stabilize it.
+// Toggle from console: window.__MPM_ENABLED = true
+export const MPM_RUNTIME = {
+  enabled: false,
+};
+if (typeof window !== 'undefined') {
+  // @ts-ignore
+  window.__MPM_ENABLED = (v: boolean) => { MPM_RUNTIME.enabled = !!v; return MPM_RUNTIME.enabled; };
+  // @ts-ignore
+  window.__MPM_STATE = MPM_RUNTIME;
+}
+
 export class SoilSimulator {
   field: VoxelField;
   mpm: MPMSolverState;
@@ -31,6 +43,7 @@ export class SoilSimulator {
   }
 
   activate() {
+    if (!MPM_RUNTIME.enabled) return; // MPM disabled — skip particle spawn
     this.simActive = true;
     this.idleFrames = 0;
 
@@ -45,8 +58,28 @@ export class SoilSimulator {
   }
 
   step(dt: number): boolean {
+    if (!MPM_RUNTIME.enabled) {
+      // Solver disabled — clear any leftover particles and bail.
+      if (this.mpm.numParticles > 0) {
+        this.mpm.numParticles = 0;
+        this.mpm.active.fill(0);
+        this.particleAge.fill(0);
+      }
+      this.simActive = false;
+      return false;
+    }
     if (!this.simActive) return false;
     this.frameCounter++;
+
+    // Age all active particles and force-deposit old ones
+    for (let p = 0; p < this.mpm.numParticles; p++) {
+      if (!this.mpm.active[p]) continue;
+      this.particleAge[p]++;
+      if (this.particleAge[p] > MAX_PARTICLE_LIFETIME) {
+        this.mpm.active[p] = 0;
+        this.particleAge[p] = 0;
+      }
+    }
 
     // Age all active particles and force-deposit old ones
     for (let p = 0; p < this.mpm.numParticles; p++) {
