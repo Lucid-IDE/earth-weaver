@@ -13,6 +13,7 @@ export default function DiagnosticPanel({ open, onClose }: { open: boolean; onCl
   const [suite, setSuite] = useState<TestSuiteState>({ results: [], running: false, current: null });
   const [aiBusy, setAiBusy] = useState(false);
   const [aiText, setAiText] = useState<string>('');
+  const [mpmOn, setMpmOn] = useState(MPM_RUNTIME.enabled);
   const [openSection, setOpenSection] = useState<Record<string, boolean>>({
     input: true, drive: true, joints: true, render: true, tests: true, ai: true,
   });
