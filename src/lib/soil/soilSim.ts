@@ -16,6 +16,18 @@ import { MPM_DT, MPM_STEPS_PER_FRAME } from '../mpm/constants';
 
 const MAX_PARTICLE_LIFETIME = 300; // frames before forced deposit
 
+// Global runtime toggle — MPM solver disabled by default while we stabilize it.
+// Toggle from console: window.__MPM_ENABLED = true
+export const MPM_RUNTIME = {
+  enabled: false,
+};
+if (typeof window !== 'undefined') {
+  // @ts-ignore
+  window.__MPM_ENABLED = (v: boolean) => { MPM_RUNTIME.enabled = !!v; return MPM_RUNTIME.enabled; };
+  // @ts-ignore
+  window.__MPM_STATE = MPM_RUNTIME;
+}
+
 export class SoilSimulator {
   field: VoxelField;
   mpm: MPMSolverState;
