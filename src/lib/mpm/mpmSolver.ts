@@ -245,6 +245,13 @@ function particleToGrid(state: MPMSolverState, dt: number) {
     // SVD: F = U Σ V^T
     const { U, sigma, V } = svd3x3(F);
 
+    // Clamp singular values to a safe range to prevent log/div blowup
+    // and inversion (J <= 0). This is the standard MPM safety net.
+    const SIG_MIN = 0.1, SIG_MAX = 10.0;
+    sigma[0] = Math.min(SIG_MAX, Math.max(SIG_MIN, sigma[0]));
+    sigma[1] = Math.min(SIG_MAX, Math.max(SIG_MIN, sigma[1]));
+    sigma[2] = Math.min(SIG_MAX, Math.max(SIG_MIN, sigma[2]));
+
     // ── Drucker-Prager return mapping on singular values ──
     const friction = state.frictionAngle[p];
     const coh = state.cohesion[p];
