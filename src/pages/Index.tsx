@@ -31,6 +31,15 @@ export default function Index() {
         <SoilPresetSelector />
         <CaptureButton source="soil-terrain" metadata={stats} />
         <Button
+          variant={diagOpen ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setDiagOpen((v) => !v)}
+          className="gap-1.5"
+        >
+          <Activity className="h-3.5 w-3.5" />
+          Diagnostics
+        </Button>
+        <Button
           variant="outline"
           size="sm"
           onClick={() => setAnalystOpen(true)}
@@ -48,6 +57,8 @@ export default function Index() {
           Full View →
         </Button>
       </div>
+
+      <DiagnosticPanel open={diagOpen} onClose={() => setDiagOpen(false)} />
 
       {/* Controls HUD */}
       {equipmentStats && (
