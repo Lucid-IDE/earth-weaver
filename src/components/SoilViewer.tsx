@@ -652,6 +652,78 @@ function EquipmentController({
       explosiveImpact(pos[0], pos[1], pos[2], 0.12, field, sim);
       rebuildMesh();
     }
+
+    // ── Publish telemetry frame (every frame; bus throttles subscribers) ──
+    const now = performance.now() / 1000;
+    const fps = clampedDt > 0 ? Math.min(120, 1 / clampedDt) : 0;
+    const sim2 = simRef.current;
+    const exP = es.excPhysics, dzP = es.dozPhysics;
+    const exV = es.excavator.vehicle, dzV = es.bulldozer.vehicle;
+    const frame: TelemetryFrame = {
+      t: now,
+      active: es.activeEquipment,
+      input: {
+        keys: {},
+        exc: {
+          leftTrack: getExcavatorInputs(ctrl).leftTrack,
+          rightTrack: getExcavatorInputs(ctrl).rightTrack,
+          swing: (ctrl.swingRight ? 1 : 0) + (ctrl.swingLeft ? -1 : 0),
+          boom: (ctrl.boomUp ? 1 : 0) + (ctrl.boomDown ? -1 : 0),
+          stick: (ctrl.stickIn ? 1 : 0) + (ctrl.stickOut ? -1 : 0),
+          bucket: (ctrl.bucketCurl ? 1 : 0) + (ctrl.bucketDump ? -1 : 0),
+        },
+        doz: {
+          leftTrack: getBulldozerInputs(ctrl).leftTrack,
+          rightTrack: getBulldozerInputs(ctrl).rightTrack,
+          bladeUp: (ctrl.bladeUp ? 1 : 0) + (ctrl.bladeDown ? -1 : 0),
+          bladeTilt: (ctrl.bladeTiltRight ? 1 : 0) + (ctrl.bladeTiltLeft ? -1 : 0),
+          bladeAngle: (ctrl.bladeAngleRight ? 1 : 0) + (ctrl.bladeAngleLeft ? -1 : 0),
+        },
+        events: {
+          switchExc: ctrl.switchToExcavator, switchDoz: ctrl.switchToBulldozer,
+          switchFree: ctrl.switchToFreeCamera, impact: ctrl.triggerImpact, explosion: ctrl.triggerExplosion,
+        },
+      },
+      exc: {
+        rpm: exP.engine.rpm, throttle: exP.engine.throttle, engineTorque: exP.engine.torque,
+        engineStalled: exP.engine.stalled, engineLugging: exP.engine.lugging,
+        hydPressure: exP.hydraulics.pressure, hydFlow: exP.hydraulics.flowRate, reliefOpen: exP.hydraulics.reliefOpen,
+        leftDriveTorque: exP.drivetrain.leftDriveTorque, rightDriveTorque: exP.drivetrain.rightDriveTorque,
+        leftTrackVel: exP.drivetrain.leftTrackVelocity, rightTrackVel: exP.drivetrain.rightTrackVelocity,
+        forwardVel: exP.forwardVelocity, angularVel: exP.angularVelocity,
+        slip: exP.slipAmount, isSlipping: exP.isSlipping,
+        leftSinkage: exP.leftSinkage, rightSinkage: exP.rightSinkage,
+        groundResistance: exP.groundResistance,
+        posX: exV.posX, posZ: exV.posZ, heading: exV.heading, pitch: exV.pitch,
+      },
+      doz: {
+        rpm: dzP.engine.rpm, throttle: dzP.engine.throttle, engineTorque: dzP.engine.torque,
+        engineStalled: dzP.engine.stalled, engineLugging: dzP.engine.lugging,
+        hydPressure: dzP.hydraulics.pressure, hydFlow: dzP.hydraulics.flowRate, reliefOpen: dzP.hydraulics.reliefOpen,
+        leftDriveTorque: dzP.drivetrain.leftDriveTorque, rightDriveTorque: dzP.drivetrain.rightDriveTorque,
+        leftTrackVel: dzP.drivetrain.leftTrackVelocity, rightTrackVel: dzP.drivetrain.rightTrackVelocity,
+        forwardVel: dzP.forwardVelocity, angularVel: dzP.angularVelocity,
+        slip: dzP.slipAmount, isSlipping: dzP.isSlipping,
+        leftSinkage: dzP.leftSinkage, rightSinkage: dzP.rightSinkage,
+        groundResistance: dzP.groundResistance,
+        posX: dzV.posX, posZ: dzV.posZ, heading: dzV.heading, pitch: dzV.pitch,
+      },
+      joints: {
+        swing: es.excavator.swing.angle, boom: es.excavator.boom.angle,
+        stick: es.excavator.stick.angle, bucket: es.excavator.bucket.angle,
+        bucketFill: es.excavator.bucketFill,
+        bladeHeight: es.bulldozer.bladeHeight,
+        bladeTilt: es.bulldozer.bladeTilt, bladeAngle: es.bulldozer.bladeAngle,
+      },
+      render: {
+        fps, frameMs: clampedDt * 1000,
+        vertices: 0, triangles: 0,
+        activeParticles: sim2?.getActiveParticles() ?? 0,
+        totalParticles: sim2?.mpm.numParticles ?? 0,
+        simActive: sim2?.simActive ?? false,
+      },
+    };
+    telemetryBus.publish(frame);
   });
   
   const es = equipmentState.current;
