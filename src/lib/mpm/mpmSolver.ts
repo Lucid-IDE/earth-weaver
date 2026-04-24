@@ -403,13 +403,25 @@ function gridUpdate(state: MPMSolverState, dt: number, field?: VoxelField) {
       for (let i = 0; i < GS; i++) {
         const idx = gidx(i, j, k);
         const m = state.gridMass[idx];
-        if (m < 1e-10) continue;
+        // Mass-clamp guardrail — avoid NaN from divide-by-(near)-zero.
+        if (m < 1e-6) {
+          state.gridMass[idx] = 0;
+          state.gridVx[idx] = 0;
+          state.gridVy[idx] = 0;
+          state.gridVz[idx] = 0;
+          continue;
+        }
 
         // Normalize momentum → velocity
         const invM = 1.0 / m;
         let vx = state.gridVx[idx] * invM;
         let vy = state.gridVy[idx] * invM;
         let vz = state.gridVz[idx] * invM;
+
+        // NaN/Inf scrub — if this node went unstable, zero it instead of propagating.
+        if (!isFinite(vx) || !isFinite(vy) || !isFinite(vz)) {
+          vx = 0; vy = 0; vz = 0;
+        }
 
         // Apply gravity
         vy += MPM_GRAVITY * dt;
