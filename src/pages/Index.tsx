@@ -7,7 +7,8 @@ import ControlsHUD from '@/components/ControlsHUD';
 import CaptureButton from '@/components/analyst/CaptureButton';
 import AnalystPanel from '@/components/analyst/AnalystPanel';
 import SoilPresetSelector from '@/components/SoilPresetSelector';
-import { Brain } from 'lucide-react';
+import DiagnosticPanel from '@/components/DiagnosticPanel';
+import { Brain, Activity } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export default function Index() {
@@ -18,6 +19,7 @@ export default function Index() {
   });
   const [equipmentStats, setEquipmentStats] = useState<EquipmentStats | null>(null);
   const [analystOpen, setAnalystOpen] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
 
   return (
     <div className="w-screen h-screen bg-background relative overflow-hidden">
