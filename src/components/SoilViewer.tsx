@@ -40,6 +40,7 @@ import {
 import {
   ensureAudioContext, updateVehicleAudio, playLandingThump,
 } from '@/lib/equipment/audio';
+import { telemetryBus, TelemetryFrame } from '@/lib/diagnostics/telemetryBus';
 
 export interface SoilStats {
   vertices: number;
