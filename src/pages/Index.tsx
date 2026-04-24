@@ -7,7 +7,8 @@ import ControlsHUD from '@/components/ControlsHUD';
 import CaptureButton from '@/components/analyst/CaptureButton';
 import AnalystPanel from '@/components/analyst/AnalystPanel';
 import SoilPresetSelector from '@/components/SoilPresetSelector';
-import { Brain } from 'lucide-react';
+import DiagnosticPanel from '@/components/DiagnosticPanel';
+import { Brain, Activity } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export default function Index() {
@@ -18,6 +19,7 @@ export default function Index() {
   });
   const [equipmentStats, setEquipmentStats] = useState<EquipmentStats | null>(null);
   const [analystOpen, setAnalystOpen] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
 
   return (
     <div className="w-screen h-screen bg-background relative overflow-hidden">
@@ -28,6 +30,15 @@ export default function Index() {
       <div className="absolute top-4 right-4 flex items-center gap-2 z-40">
         <SoilPresetSelector />
         <CaptureButton source="soil-terrain" metadata={stats} />
+        <Button
+          variant={diagOpen ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setDiagOpen((v) => !v)}
+          className="gap-1.5"
+        >
+          <Activity className="h-3.5 w-3.5" />
+          Diagnostics
+        </Button>
         <Button
           variant="outline"
           size="sm"
@@ -46,6 +57,8 @@ export default function Index() {
           Full View →
         </Button>
       </div>
+
+      <DiagnosticPanel open={diagOpen} onClose={() => setDiagOpen(false)} />
 
       {/* Controls HUD */}
       {equipmentStats && (
