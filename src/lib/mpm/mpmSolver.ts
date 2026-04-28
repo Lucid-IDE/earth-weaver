@@ -287,6 +287,15 @@ function particleToGrid(state: MPMSolverState, dt: number) {
     // SVD: F = U Σ V^T
     const { U, sigma, V } = svd3x3(F);
 
+    // Track raw sigma range for health metrics BEFORE clamping
+    for (let s = 0; s < 3; s++) {
+      const v = sigma[s];
+      if (isFinite(v)) {
+        if (v < _hSigmaMin) _hSigmaMin = v;
+        if (v > _hSigmaMax) _hSigmaMax = v;
+      }
+    }
+
     // Clamp singular values to a safe range to prevent log/div blowup
     // and inversion (J <= 0). This is the standard MPM safety net.
     const SIG_MIN = 0.1, SIG_MAX = 10.0;
