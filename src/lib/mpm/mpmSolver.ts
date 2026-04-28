@@ -634,6 +634,17 @@ function gridToParticle(state: MPMSolverState, dt: number) {
       newVx *= s; newVy *= s; newVz *= s;
     }
 
+    // Health: track particle velocity range + NaN
+    if (!isFinite(newVx) || !isFinite(newVy) || !isFinite(newVz)) {
+      _hPartNaN++;
+      if (_hPartHot.length < 256) _hPartHot.push(p);
+      newVx = 0; newVy = 0; newVz = 0;
+    } else {
+      const sp = Math.sqrt(newVx * newVx + newVy * newVy + newVz * newVz);
+      if (sp < _hPartVelMin) _hPartVelMin = sp;
+      if (sp > _hPartVelMax) _hPartVelMax = sp;
+    }
+
     state.vx[p] = newVx;
     state.vy[p] = newVy;
     state.vz[p] = newVz;
