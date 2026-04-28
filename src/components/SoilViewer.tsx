@@ -846,6 +846,21 @@ function SoilTerrain({
 
     const normal = e.face.normal.clone();
     const digPoint = e.point.clone().addScaledVector(normal, -DIG_RADIUS * 0.4);
+
+    // Record dig event for replay + smoothed-kernel center
+    const seed = mpmHealth.rngSeedForNextDig ?? Math.floor(Math.random() * 0x7fffffff);
+    setSpawnSeed(seed);
+    mpmHealth.recordDig({
+      t: performance.now() / 1000,
+      worldX: digPoint.x, worldY: digPoint.y, worldZ: digPoint.z,
+      radius: DIG_RADIUS,
+      kernelStrength: mpmHealth.kernel.strength,
+      kernelRadius: mpmHealth.kernel.radius,
+      rngSeed: seed,
+      source: 'click',
+    });
+    mpmHealth.rngSeedForNextDig = null;
+
     fieldRef.current.applyStamp(digPoint.x, digPoint.y, digPoint.z, DIG_RADIUS);
     rebuildMesh();
     simRef.current?.activate();
