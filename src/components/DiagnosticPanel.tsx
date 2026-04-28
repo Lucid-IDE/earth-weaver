@@ -16,8 +16,13 @@ export default function DiagnosticPanel({ open, onClose }: { open: boolean; onCl
   const [aiBusy, setAiBusy] = useState(false);
   const [aiText, setAiText] = useState<string>('');
   const [mpmOn, setMpmOn] = useState(MPM_RUNTIME.enabled);
+  const [health, setHealth] = useState<HealthMetrics>(mpmHealth.metrics);
+  const [heatmap, setHeatmap] = useState(mpmHealth.heatmapEnabled);
+  const [kRadius, setKRadius] = useState(mpmHealth.kernel.radius);
+  const [kStrength, setKStrength] = useState(mpmHealth.kernel.strength);
   const [openSection, setOpenSection] = useState<Record<string, boolean>>({
     input: true, drive: true, joints: true, render: true, tests: true, ai: true,
+    health: true, kernel: true, replay: true,
   });
   const runnerRef = useRef<DiagnosticTestRunner | null>(null);
 
