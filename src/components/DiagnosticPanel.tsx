@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Activity, Play, Brain, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { Activity, Play, Brain, X, ChevronDown, ChevronRight, RotateCcw, Flame } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Slider } from '@/components/ui/slider';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { telemetryBus, TelemetryFrame } from '@/lib/diagnostics/telemetryBus';
 import { DiagnosticTestRunner, TestResult, TestSuiteState } from '@/lib/diagnostics/selfTest';
 import { MPM_RUNTIME } from '@/lib/soil/soilSim';
+import { mpmHealth, HealthMetrics } from '@/lib/mpm/mpmHealth';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 
