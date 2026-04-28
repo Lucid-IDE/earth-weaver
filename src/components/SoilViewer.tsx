@@ -1,4 +1,4 @@
-import { memo, useRef, useEffect, useCallback, useMemo } from 'react';
+import { memo, useRef, useEffect, useCallback, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, ThreeEvent, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
