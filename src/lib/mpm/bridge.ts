@@ -118,10 +118,24 @@ export function spawnParticlesFromSDF(
         // Compute SDF gradient for ejection velocity direction
         const [gx, gy, gz] = field.gradient(ix, iy, iz);
         const glen = Math.sqrt(gx * gx + gy * gy + gz * gz);
-        // Ejection direction: along SDF gradient (outward from solid)
-        const ejectSpeed = 0.3; // initial velocity pushing particles into the cavity
-        let ejx = 0, ejy = -0.1, ejz = 0; // default: slight downward
-        if (glen > 1e-6) {
+
+        // ── Smoothed disturbance kernel ──────────────────────────
+        // Apply Wendland C2 falloff based on distance from the dig center
+        // (taken from the last recorded dig event). Replaces the hard
+        // uniform impulse with a smooth, compact-support velocity field.
+        let ejectSpeed = mpmHealth.kernel.strength;
+        const dig = mpmHealth.getLastDig();
+        if (dig && mpmHealth.kernel.enabled) {
+          const dx_ = wx - dig.worldX;
+          const dy_ = wy - dig.worldY;
+          const dz_ = wz - dig.worldZ;
+          const dist = Math.sqrt(dx_ * dx_ + dy_ * dy_ + dz_ * dz_);
+          const r = Math.max(1e-4, dig.radius * mpmHealth.kernel.radius);
+          ejectSpeed *= wendland(dist / r);
+        }
+
+        let ejx = 0, ejy = -0.05 * ejectSpeed, ejz = 0;
+        if (glen > 1e-6 && ejectSpeed > 1e-6) {
           ejx = (gx / glen) * ejectSpeed;
           ejy = (gy / glen) * ejectSpeed;
           ejz = (gz / glen) * ejectSpeed;
