@@ -7,7 +7,8 @@ import { SoilSimulator } from '@/lib/soil/soilSim';
 import { soilVertexShader, soilFragmentShader } from '@/lib/soil/soilShader';
 import { DIG_RADIUS } from '@/lib/soil/constants';
 import { getMaterialAt } from '@/lib/soil/materialBrain';
-import { mpmToWorld } from '@/lib/mpm/bridge';
+import { mpmToWorld, setSpawnSeed } from '@/lib/mpm/bridge';
+import { mpmHealth } from '@/lib/mpm/mpmHealth';
 import { triggerAutoCapture } from '@/lib/analyst/autoCapture';
 import {
   dustVertexShader,
