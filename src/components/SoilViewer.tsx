@@ -760,6 +760,20 @@ function SoilTerrain({
   const statsTickRef = useRef(0);
   const [heatmapOn, setHeatmapOn] = useState(false);
   useEffect(() => mpmHealth.subscribe(() => setHeatmapOn(mpmHealth.heatmapEnabled)), []);
+  useEffect(() => {
+    const onReplay = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (!d || !fieldRef.current) return;
+      setSpawnSeed(d.rngSeed);
+      mpmHealth.recordDig({ ...d, source: 'replay', t: performance.now() / 1000 });
+      mpmHealth.rngSeedForNextDig = null;
+      fieldRef.current.applyStamp(d.worldX, d.worldY, d.worldZ, d.radius);
+      rebuildMesh();
+      simRef.current?.activate();
+    };
+    window.addEventListener('mpm:replay-dig', onReplay);
+    return () => window.removeEventListener('mpm:replay-dig', onReplay);
+  }, []);
   
   const equipmentState = useRef({
     activeEquipment: 'none' as EquipmentType,
