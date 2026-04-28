@@ -241,6 +241,18 @@ export function mpmStep(state: MPMSolverState, dt: number = MPM_DT, field?: Voxe
   }, hot);
 }
 
+function clearGrid(state: MPMSolverState) {
+  state.gridMass.fill(0);
+  state.gridVx.fill(0);
+  state.gridVy.fill(0);
+  state.gridVz.fill(0);
+}
+
+interface GridStats {
+  massMin: number; massMax: number; activeCells: number;
+  velMin: number; velMax: number; naNCount: number;
+  naNGridIdxs: number[];
+}
 
 // ── P2G: Particle to Grid ────────────────────────────────────────────
 function particleToGrid(state: MPMSolverState, dt: number) {
