@@ -17,6 +17,7 @@ import {
   MPM_WORLD_MIN_Z, MPM_WORLD_MAX_Z,
   MAX_PARTICLES,
 } from './constants';
+import { mpmHealth, wendland, DigEvent } from './mpmHealth';
 
 // ── World ↔ MPM coordinate mapping ──────────────────────────────────
 export function worldToMPM(wx: number, wy: number, wz: number): [number, number, number] {
@@ -45,10 +46,12 @@ function classifyMaterial(friction: number, cohesion: number): MaterialType {
   return MaterialType.Silt;
 }
 
-// Simple seeded random for jittering particle positions
+// Seeded random for jittering particle positions — overridable for deterministic replay
 let _seed = 12345;
+export function setSpawnSeed(seed: number) { _seed = seed >>> 0 || 12345; }
+export function getSpawnSeed(): number { return _seed; }
 function srand(): number {
-  _seed = (_seed * 16807 + 0) % 2147483647;
+  _seed = (_seed * 16807) % 2147483647;
   return (_seed & 0x7fffffff) / 0x7fffffff;
 }
 
