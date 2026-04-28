@@ -213,10 +213,39 @@ function sampleSDF(field: VoxelField, wx: number, wy: number, wz: number): { phi
 // Re-enabled full grid-based solver with Fixed Corotated stress + Drucker-Prager
 
 export function mpmStep(state: MPMSolverState, dt: number = MPM_DT, field?: VoxelField): void {
+  _resetStepHealth();
   clearGrid(state);
   particleToGrid(state, dt);
-  gridUpdate(state, dt, field);
+  const gridStats = gridUpdate(state, dt, field);
   gridToParticle(state, dt);
+
+  // Publish health metrics (cheap; UI throttles its own subscription)
+  const hot: NaNHotspot = {
+    gridIdxs: gridStats.naNGridIdxs,
+    particleIdxs: _hPartHot.slice(0, 256),
+    firstGridIdx: gridStats.naNGridIdxs[0] ?? -1,
+    firstParticleIdx: _hPartHot[0] ?? -1,
+  };
+  mpmHealth.publish({
+    gridMassMin: gridStats.massMin === Infinity ? 0 : gridStats.massMin,
+    gridMassMax: gridStats.massMax === -Infinity ? 0 : gridStats.massMax,
+    gridMassActive: gridStats.activeCells,
+    gridVelMin: gridStats.velMin === Infinity ? 0 : gridStats.velMin,
+    gridVelMax: gridStats.velMax === -Infinity ? 0 : gridStats.velMax,
+    gridNaNCount: gridStats.naNCount,
+    partVelMin: _hPartVelMin === Infinity ? 0 : _hPartVelMin,
+    partVelMax: _hPartVelMax === -Infinity ? 0 : _hPartVelMax,
+    partNaNCount: _hPartNaN,
+    sigmaMin: _hSigmaMin === Infinity ? 1 : _hSigmaMin,
+    sigmaMax: _hSigmaMax === -Infinity ? 1 : _hSigmaMax,
+  }, hot);
+}
+
+function clearGrid(state: MPMSolverState) {
+  state.gridMass.fill(0);
+  state.gridVx.fill(0);
+  state.gridVy.fill(0);
+  state.gridVz.fill(0);
 }
 
 function clearGrid(state: MPMSolverState) {
