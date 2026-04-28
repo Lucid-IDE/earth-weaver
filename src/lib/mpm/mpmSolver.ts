@@ -453,8 +453,12 @@ function particleToGrid(state: MPMSolverState, dt: number) {
 }
 
 // ── Grid Update: gravity + SDF collision + boundary conditions ───────
-function gridUpdate(state: MPMSolverState, dt: number, field?: VoxelField) {
+function gridUpdate(state: MPMSolverState, dt: number, field?: VoxelField): GridStats {
   const boundary = 3;
+  const stats: GridStats = {
+    massMin: Infinity, massMax: -Infinity, activeCells: 0,
+    velMin: Infinity, velMax: -Infinity, naNCount: 0, naNGridIdxs: [],
+  };
 
   for (let k = 0; k < GS; k++) {
     for (let j = 0; j < GS; j++) {
@@ -470,6 +474,10 @@ function gridUpdate(state: MPMSolverState, dt: number, field?: VoxelField) {
           continue;
         }
 
+        if (m < stats.massMin) stats.massMin = m;
+        if (m > stats.massMax) stats.massMax = m;
+        stats.activeCells++;
+
         // Normalize momentum → velocity
         const invM = 1.0 / m;
         let vx = state.gridVx[idx] * invM;
@@ -479,6 +487,12 @@ function gridUpdate(state: MPMSolverState, dt: number, field?: VoxelField) {
         // NaN/Inf scrub — if this node went unstable, zero it instead of propagating.
         if (!isFinite(vx) || !isFinite(vy) || !isFinite(vz)) {
           vx = 0; vy = 0; vz = 0;
+          stats.naNCount++;
+          if (stats.naNGridIdxs.length < 256) stats.naNGridIdxs.push(idx);
+        } else {
+          const speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+          if (speed < stats.velMin) stats.velMin = speed;
+          if (speed > stats.velMax) stats.velMax = speed;
         }
 
         // Apply gravity
