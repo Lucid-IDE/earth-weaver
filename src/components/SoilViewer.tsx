@@ -917,6 +917,7 @@ function SoilTerrain({
       <mesh ref={meshRef} material={material} onClick={handleClick} />
       <FluidRenderer simRef={simRef} />
       <DustCloud simRef={simRef} />
+      <MpmHeatmapOverlay enabled={heatmapOn} simRef={simRef} />
       <EquipmentController
         fieldRef={fieldRef}
         simRef={simRef}
