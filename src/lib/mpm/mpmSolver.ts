@@ -555,6 +555,7 @@ function gridUpdate(state: MPMSolverState, dt: number, field?: VoxelField): Grid
       }
     }
   }
+  return stats;
 }
 
 // ── G2P: Grid to Particle ────────────────────────────────────────────
