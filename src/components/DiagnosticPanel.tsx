@@ -205,6 +205,52 @@ export default function DiagnosticPanel({ open, onClose }: { open: boolean; onCl
           )}
         </Section>
 
+        <Section id="health" title="MPM Health">
+          <Row k="tripped" v={health.tripped ? `YES — ${health.tripReason}` : 'no'} hi={health.tripped} />
+          <Row k="grid mass min" v={health.gridMassMin.toExponential(2)} />
+          <Row k="grid mass max" v={health.gridMassMax.toExponential(2)} />
+          <Row k="grid active" v={health.gridMassActive} />
+          <Row k="grid vel max" v={health.gridVelMax.toExponential(2)} />
+          <Row k="grid NaN" v={health.gridNaNCount} hi={health.gridNaNCount > 0} />
+          <Row k="part vel max" v={health.partVelMax.toExponential(2)} />
+          <Row k="part NaN" v={health.partNaNCount} hi={health.partNaNCount > 0} />
+          <Row k="σ min" v={health.sigmaMin.toExponential(2)} />
+          <Row k="σ max" v={health.sigmaMax.toExponential(2)} hi={health.sigmaMax > 5} />
+          <div className="flex gap-2 pt-1.5">
+            <Button size="sm" variant={heatmap ? 'default' : 'outline'}
+              onClick={() => { mpmHealth.heatmapEnabled = !mpmHealth.heatmapEnabled; setHeatmap(mpmHealth.heatmapEnabled); }}
+              className="gap-1.5 flex-1 h-7 text-[11px]"><Flame className="h-3 w-3" /> NaN Heatmap</Button>
+            <Button size="sm" variant="outline" onClick={() => mpmHealth.reset()} className="h-7 text-[11px]">Reset</Button>
+          </div>
+          {mpmHealth.postMortem && (
+            <div className="mt-2 p-2 rounded bg-destructive/10 border border-destructive/30 text-[10px] font-mono">
+              <div className="text-destructive font-semibold mb-1">POST-MORTEM</div>
+              <div>grid NaN: {mpmHealth.postMortem.metrics.gridNaNCount}, part NaN: {mpmHealth.postMortem.metrics.partNaNCount}</div>
+              <div>first grid idx: {mpmHealth.postMortem.hotspot.firstGridIdx}</div>
+              <div>first part idx: {mpmHealth.postMortem.hotspot.firstParticleIdx}</div>
+              {mpmHealth.postMortem.digEvent && (<div className="mt-1 text-amber-400">dig seed={mpmHealth.postMortem.digEvent.rngSeed} r={mpmHealth.postMortem.digEvent.radius.toFixed(3)}</div>)}
+            </div>
+          )}
+        </Section>
+
+        <Section id="kernel" title="Disturbance Kernel (Wendland)">
+          <div><div className="flex justify-between text-[11px] font-mono"><span>radius ×</span><span className="text-accent">{kRadius.toFixed(2)}</span></div>
+            <Slider min={0.2} max={3} step={0.05} value={[kRadius]} onValueChange={([v]) => { setKRadius(v); mpmHealth.kernel.radius = v; }} /></div>
+          <div className="mt-2"><div className="flex justify-between text-[11px] font-mono"><span>strength</span><span className="text-accent">{kStrength.toFixed(3)}</span></div>
+            <Slider min={0} max={1.5} step={0.01} value={[kStrength]} onValueChange={([v]) => { setKStrength(v); mpmHealth.kernel.strength = v; }} /></div>
+          <Button size="sm" variant={mpmHealth.kernel.enabled ? 'default' : 'outline'} onClick={() => { mpmHealth.kernel.enabled = !mpmHealth.kernel.enabled; setHealth({ ...mpmHealth.metrics }); }} className="w-full mt-2 h-7 text-[11px]">Smoothed: {mpmHealth.kernel.enabled ? 'ON' : 'OFF (legacy)'}</Button>
+        </Section>
+
+        <Section id="replay" title="Deterministic Replay">
+          {health.lastDig ? (<>
+            <Row k="src" v={health.lastDig.source} />
+            <Row k="seed" v={health.lastDig.rngSeed} />
+            <Row k="x" v={health.lastDig.worldX} /><Row k="y" v={health.lastDig.worldY} /><Row k="z" v={health.lastDig.worldZ} />
+            <Row k="radius" v={health.lastDig.radius} />
+            <Button size="sm" variant="outline" className="gap-1.5 w-full mt-1.5 h-7 text-[11px]" onClick={() => { const d = mpmHealth.getLastDig(); if (!d) return; mpmHealth.rngSeedForNextDig = d.rngSeed; window.dispatchEvent(new CustomEvent('mpm:replay-dig', { detail: d })); toast({ title: 'Replay queued', description: `seed=${d.rngSeed}` }); }}><RotateCcw className="h-3 w-3" /> Replay last dig</Button>
+          </>) : (<div className="text-[11px] text-muted-foreground">No dig recorded yet.</div>)}
+        </Section>
+
         <Section id="tests" title="Self-Test Results">
           {suite.results.length === 0 && (
             <div className="text-[11px] text-muted-foreground">Click "Run All Tests" to verify every control end-to-end.</div>
