@@ -75,6 +75,9 @@ class HealthMonitorImpl {
     enabled: true,  // false = legacy hard impulse
   };
 
+  // NaN/Inf heatmap overlay toggle
+  heatmapEnabled = false;
+
   // Replay recorder
   digHistory: DigEvent[] = [];
   private maxDigHistory = 32;
