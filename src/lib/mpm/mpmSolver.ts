@@ -17,6 +17,20 @@ import {
 } from './constants';
 import { VoxelField } from '../soil/VoxelField';
 import { VOXEL_SIZE, SURFACE_IY } from '../soil/constants';
+import { mpmHealth, NaNHotspot } from './mpmHealth';
+
+// ── Per-step health accumulators (module-level scratch, reset each step) ──
+let _hSigmaMin = Infinity, _hSigmaMax = -Infinity;
+let _hPartVelMin = Infinity, _hPartVelMax = -Infinity;
+let _hPartNaN = 0;
+const _hPartHot: number[] = [];
+
+function _resetStepHealth() {
+  _hSigmaMin = Infinity; _hSigmaMax = -Infinity;
+  _hPartVelMin = Infinity; _hPartVelMax = -Infinity;
+  _hPartNaN = 0;
+  _hPartHot.length = 0;
+}
 
 // ── Particle data ────────────────────────────────────────────────────
 export const enum MaterialType {
@@ -199,10 +213,32 @@ function sampleSDF(field: VoxelField, wx: number, wy: number, wz: number): { phi
 // Re-enabled full grid-based solver with Fixed Corotated stress + Drucker-Prager
 
 export function mpmStep(state: MPMSolverState, dt: number = MPM_DT, field?: VoxelField): void {
+  _resetStepHealth();
   clearGrid(state);
   particleToGrid(state, dt);
-  gridUpdate(state, dt, field);
+  const gridStats = gridUpdate(state, dt, field);
   gridToParticle(state, dt);
+
+  // Publish health metrics (cheap; UI throttles its own subscription)
+  const hot: NaNHotspot = {
+    gridIdxs: gridStats.naNGridIdxs,
+    particleIdxs: _hPartHot.slice(0, 256),
+    firstGridIdx: gridStats.naNGridIdxs[0] ?? -1,
+    firstParticleIdx: _hPartHot[0] ?? -1,
+  };
+  mpmHealth.publish({
+    gridMassMin: gridStats.massMin === Infinity ? 0 : gridStats.massMin,
+    gridMassMax: gridStats.massMax === -Infinity ? 0 : gridStats.massMax,
+    gridMassActive: gridStats.activeCells,
+    gridVelMin: gridStats.velMin === Infinity ? 0 : gridStats.velMin,
+    gridVelMax: gridStats.velMax === -Infinity ? 0 : gridStats.velMax,
+    gridNaNCount: gridStats.naNCount,
+    partVelMin: _hPartVelMin === Infinity ? 0 : _hPartVelMin,
+    partVelMax: _hPartVelMax === -Infinity ? 0 : _hPartVelMax,
+    partNaNCount: _hPartNaN,
+    sigmaMin: _hSigmaMin === Infinity ? 1 : _hSigmaMin,
+    sigmaMax: _hSigmaMax === -Infinity ? 1 : _hSigmaMax,
+  }, hot);
 }
 
 function clearGrid(state: MPMSolverState) {
@@ -210,6 +246,12 @@ function clearGrid(state: MPMSolverState) {
   state.gridVx.fill(0);
   state.gridVy.fill(0);
   state.gridVz.fill(0);
+}
+
+interface GridStats {
+  massMin: number; massMax: number; activeCells: number;
+  velMin: number; velMax: number; naNCount: number;
+  naNGridIdxs: number[];
 }
 
 // ── P2G: Particle to Grid ────────────────────────────────────────────
@@ -244,6 +286,15 @@ function particleToGrid(state: MPMSolverState, dt: number) {
 
     // SVD: F = U Σ V^T
     const { U, sigma, V } = svd3x3(F);
+
+    // Track raw sigma range for health metrics BEFORE clamping
+    for (let s = 0; s < 3; s++) {
+      const v = sigma[s];
+      if (isFinite(v)) {
+        if (v < _hSigmaMin) _hSigmaMin = v;
+        if (v > _hSigmaMax) _hSigmaMax = v;
+      }
+    }
 
     // Clamp singular values to a safe range to prevent log/div blowup
     // and inversion (J <= 0). This is the standard MPM safety net.
@@ -402,8 +453,12 @@ function particleToGrid(state: MPMSolverState, dt: number) {
 }
 
 // ── Grid Update: gravity + SDF collision + boundary conditions ───────
-function gridUpdate(state: MPMSolverState, dt: number, field?: VoxelField) {
+function gridUpdate(state: MPMSolverState, dt: number, field?: VoxelField): GridStats {
   const boundary = 3;
+  const stats: GridStats = {
+    massMin: Infinity, massMax: -Infinity, activeCells: 0,
+    velMin: Infinity, velMax: -Infinity, naNCount: 0, naNGridIdxs: [],
+  };
 
   for (let k = 0; k < GS; k++) {
     for (let j = 0; j < GS; j++) {
@@ -419,6 +474,10 @@ function gridUpdate(state: MPMSolverState, dt: number, field?: VoxelField) {
           continue;
         }
 
+        if (m < stats.massMin) stats.massMin = m;
+        if (m > stats.massMax) stats.massMax = m;
+        stats.activeCells++;
+
         // Normalize momentum → velocity
         const invM = 1.0 / m;
         let vx = state.gridVx[idx] * invM;
@@ -428,6 +487,12 @@ function gridUpdate(state: MPMSolverState, dt: number, field?: VoxelField) {
         // NaN/Inf scrub — if this node went unstable, zero it instead of propagating.
         if (!isFinite(vx) || !isFinite(vy) || !isFinite(vz)) {
           vx = 0; vy = 0; vz = 0;
+          stats.naNCount++;
+          if (stats.naNGridIdxs.length < 256) stats.naNGridIdxs.push(idx);
+        } else {
+          const speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+          if (speed < stats.velMin) stats.velMin = speed;
+          if (speed > stats.velMax) stats.velMax = speed;
         }
 
         // Apply gravity
@@ -490,6 +555,7 @@ function gridUpdate(state: MPMSolverState, dt: number, field?: VoxelField) {
       }
     }
   }
+  return stats;
 }
 
 // ── G2P: Grid to Particle ────────────────────────────────────────────
@@ -566,6 +632,17 @@ function gridToParticle(state: MPMSolverState, dt: number) {
     if (speed > maxSpeed) {
       const s = maxSpeed / speed;
       newVx *= s; newVy *= s; newVz *= s;
+    }
+
+    // Health: track particle velocity range + NaN
+    if (!isFinite(newVx) || !isFinite(newVy) || !isFinite(newVz)) {
+      _hPartNaN++;
+      if (_hPartHot.length < 256) _hPartHot.push(p);
+      newVx = 0; newVy = 0; newVz = 0;
+    } else {
+      const sp = Math.sqrt(newVx * newVx + newVy * newVy + newVz * newVz);
+      if (sp < _hPartVelMin) _hPartVelMin = sp;
+      if (sp > _hPartVelMax) _hPartVelMax = sp;
     }
 
     state.vx[p] = newVx;

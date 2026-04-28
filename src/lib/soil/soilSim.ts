@@ -13,6 +13,7 @@ import {
 } from '../mpm/mpmSolver';
 import { spawnParticlesFromSDF, depositParticlesIntoSDF } from '../mpm/bridge';
 import { MPM_DT, MPM_STEPS_PER_FRAME } from '../mpm/constants';
+import { mpmHealth } from '../mpm/mpmHealth';
 
 const MAX_PARTICLE_LIFETIME = 300; // frames before forced deposit
 
@@ -27,6 +28,16 @@ if (typeof window !== 'undefined') {
   // @ts-ignore
   window.__MPM_STATE = MPM_RUNTIME;
 }
+
+// Wire failsafe: a NaN/Inf detection in the solver immediately disables MPM.
+// Telemetry (mpmHealth.metrics + postMortem) is preserved for inspection.
+mpmHealth.setOnTrip(() => {
+  if (MPM_RUNTIME.enabled) {
+    MPM_RUNTIME.enabled = false;
+    // eslint-disable-next-line no-console
+    console.warn('[MPM FAILSAFE] NaN/Inf detected — MPM disabled. See window.__MPM_HEALTH for forensic snapshot.');
+  }
+});
 
 export class SoilSimulator {
   field: VoxelField;

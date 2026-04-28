@@ -1,4 +1,4 @@
-import { memo, useRef, useEffect, useCallback, useMemo } from 'react';
+import { memo, useRef, useEffect, useCallback, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, ThreeEvent, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
@@ -7,7 +7,8 @@ import { SoilSimulator } from '@/lib/soil/soilSim';
 import { soilVertexShader, soilFragmentShader } from '@/lib/soil/soilShader';
 import { DIG_RADIUS } from '@/lib/soil/constants';
 import { getMaterialAt } from '@/lib/soil/materialBrain';
-import { mpmToWorld } from '@/lib/mpm/bridge';
+import { mpmToWorld, setSpawnSeed } from '@/lib/mpm/bridge';
+import { mpmHealth } from '@/lib/mpm/mpmHealth';
 import { triggerAutoCapture } from '@/lib/analyst/autoCapture';
 import {
   dustVertexShader,
@@ -34,6 +35,7 @@ import {
 import { getTerramechParams } from '@/lib/equipment/terramechanics';
 import { applyChassisTorque } from '@/lib/equipment/rigidBody';
 import { ExcavatorMesh, BulldozerMesh } from '@/components/EquipmentRenderer';
+import MpmHeatmapOverlay from '@/components/MpmHeatmapOverlay';
 import {
   createSpawnDrop, elevateForSpawn, stepSpawnDrop, SpawnDropState,
 } from '@/lib/equipment/spawnDrop';
@@ -756,6 +758,22 @@ function SoilTerrain({
   const meshFrameRef = useRef(0);
   const hudTickRef = useRef(0);
   const statsTickRef = useRef(0);
+  const [heatmapOn, setHeatmapOn] = useState(false);
+  useEffect(() => mpmHealth.subscribe(() => setHeatmapOn(mpmHealth.heatmapEnabled)), []);
+  useEffect(() => {
+    const onReplay = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (!d || !fieldRef.current) return;
+      setSpawnSeed(d.rngSeed);
+      mpmHealth.recordDig({ ...d, source: 'replay', t: performance.now() / 1000 });
+      mpmHealth.rngSeedForNextDig = null;
+      fieldRef.current.applyStamp(d.worldX, d.worldY, d.worldZ, d.radius);
+      rebuildMesh();
+      simRef.current?.activate();
+    };
+    window.addEventListener('mpm:replay-dig', onReplay);
+    return () => window.removeEventListener('mpm:replay-dig', onReplay);
+  }, []);
   
   const equipmentState = useRef({
     activeEquipment: 'none' as EquipmentType,
@@ -846,6 +864,21 @@ function SoilTerrain({
 
     const normal = e.face.normal.clone();
     const digPoint = e.point.clone().addScaledVector(normal, -DIG_RADIUS * 0.4);
+
+    // Record dig event for replay + smoothed-kernel center
+    const seed = mpmHealth.rngSeedForNextDig ?? Math.floor(Math.random() * 0x7fffffff);
+    setSpawnSeed(seed);
+    mpmHealth.recordDig({
+      t: performance.now() / 1000,
+      worldX: digPoint.x, worldY: digPoint.y, worldZ: digPoint.z,
+      radius: DIG_RADIUS,
+      kernelStrength: mpmHealth.kernel.strength,
+      kernelRadius: mpmHealth.kernel.radius,
+      rngSeed: seed,
+      source: 'click',
+    });
+    mpmHealth.rngSeedForNextDig = null;
+
     fieldRef.current.applyStamp(digPoint.x, digPoint.y, digPoint.z, DIG_RADIUS);
     rebuildMesh();
     simRef.current?.activate();
@@ -901,6 +934,7 @@ function SoilTerrain({
       <mesh ref={meshRef} material={material} onClick={handleClick} />
       <FluidRenderer simRef={simRef} />
       <DustCloud simRef={simRef} />
+      <MpmHeatmapOverlay enabled={heatmapOn} simRef={simRef} />
       <EquipmentController
         fieldRef={fieldRef}
         simRef={simRef}
