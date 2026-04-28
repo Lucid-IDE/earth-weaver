@@ -28,7 +28,9 @@ export default function DiagnosticPanel({ open, onClose }: { open: boolean; onCl
 
   useEffect(() => {
     if (!open) return;
-    return telemetryBus.subscribe(setFrame);
+    const offT = telemetryBus.subscribe(setFrame);
+    const offH = mpmHealth.subscribe(() => setHealth({ ...mpmHealth.metrics }));
+    return () => { offT(); offH(); };
   }, [open]);
 
   useEffect(() => {
