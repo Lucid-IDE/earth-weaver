@@ -17,6 +17,20 @@ import {
 } from './constants';
 import { VoxelField } from '../soil/VoxelField';
 import { VOXEL_SIZE, SURFACE_IY } from '../soil/constants';
+import { mpmHealth, NaNHotspot } from './mpmHealth';
+
+// ── Per-step health accumulators (module-level scratch, reset each step) ──
+let _hSigmaMin = Infinity, _hSigmaMax = -Infinity;
+let _hPartVelMin = Infinity, _hPartVelMax = -Infinity;
+let _hPartNaN = 0;
+const _hPartHot: number[] = [];
+
+function _resetStepHealth() {
+  _hSigmaMin = Infinity; _hSigmaMax = -Infinity;
+  _hPartVelMin = Infinity; _hPartVelMax = -Infinity;
+  _hPartNaN = 0;
+  _hPartHot.length = 0;
+}
 
 // ── Particle data ────────────────────────────────────────────────────
 export const enum MaterialType {
