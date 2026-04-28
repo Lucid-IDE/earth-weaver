@@ -758,6 +758,8 @@ function SoilTerrain({
   const meshFrameRef = useRef(0);
   const hudTickRef = useRef(0);
   const statsTickRef = useRef(0);
+  const [heatmapOn, setHeatmapOn] = useState(false);
+  useEffect(() => mpmHealth.subscribe(() => setHeatmapOn(mpmHealth.heatmapEnabled)), []);
   
   const equipmentState = useRef({
     activeEquipment: 'none' as EquipmentType,
