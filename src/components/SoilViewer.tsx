@@ -35,6 +35,7 @@ import {
 import { getTerramechParams } from '@/lib/equipment/terramechanics';
 import { applyChassisTorque } from '@/lib/equipment/rigidBody';
 import { ExcavatorMesh, BulldozerMesh } from '@/components/EquipmentRenderer';
+import MpmHeatmapOverlay from '@/components/MpmHeatmapOverlay';
 import {
   createSpawnDrop, elevateForSpawn, stepSpawnDrop, SpawnDropState,
 } from '@/lib/equipment/spawnDrop';
