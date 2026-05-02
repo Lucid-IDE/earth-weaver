@@ -175,6 +175,35 @@ function BulldozerHUD({ state }: { state: BulldozerState }) {
   );
 }
 
+function DumpTruckHUD({ state }: { state: DumpTruckState }) {
+  return (
+    <div className="bg-card/85 backdrop-blur-sm border border-border rounded-md px-4 py-2 flex gap-6">
+      <div>
+        <div className="text-[10px] text-muted-foreground font-mono mb-1">DRIVE</div>
+        <div className="grid grid-cols-3 gap-0.5 text-[9px] font-mono text-center w-[90px]">
+          <div />
+          <Key k="↑" label="Fwd" />
+          <div />
+          <Key k="←" label="Steer L" />
+          <Key k="↓" label="Rev" />
+          <Key k="→" label="Steer R" />
+        </div>
+      </div>
+      <div>
+        <div className="text-[10px] text-muted-foreground font-mono mb-1">DUMP BODY</div>
+        <div className="flex gap-1 text-[9px] font-mono flex-wrap max-w-[160px]">
+          <Key k="R" label="Raise" />
+          <Key k="F" label="Lower" />
+          <Key k="X" label="Gate" />
+          <Key k="T/G" label="PSI -/+" />
+          <Key k="Y/H" label="Load -/+" />
+        </div>
+        <div className="text-[8px] text-muted-foreground mt-1">{state.engineRpm.toFixed(0)} rpm · {(state.vehicle.speed * 100).toFixed(1)} cm/s</div>
+      </div>
+    </div>
+  );
+}
+
 function Key({ k, label, active }: { k: string; label: string; active?: boolean }) {
   return (
     <div className={`px-1.5 py-0.5 rounded border text-[9px] font-mono ${
