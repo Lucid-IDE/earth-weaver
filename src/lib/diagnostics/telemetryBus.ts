@@ -8,7 +8,8 @@ export interface InputSnapshot {
   // Combined per-equipment inputs (-1..1)
   exc: { leftTrack: number; rightTrack: number; swing: number; boom: number; stick: number; bucket: number };
   doz: { leftTrack: number; rightTrack: number; bladeUp: number; bladeTilt: number; bladeAngle: number };
-  events: { switchExc: boolean; switchDoz: boolean; switchFree: boolean; impact: boolean; explosion: boolean };
+  truck?: { throttle: number; steer: number; dumpBed: number; bedLoad: number; tirePressurePsi: number };
+  events: { switchExc: boolean; switchDoz: boolean; switchTruck?: boolean; switchFree: boolean; impact: boolean; explosion: boolean };
 }
 
 export interface PhysicsSnapshot {
@@ -37,6 +38,23 @@ export interface PhysicsSnapshot {
   pitch: number;
 }
 
+export interface DumpTruckSnapshot {
+  rpm: number;
+  throttle: number;
+  forwardVel: number;
+  steeringAngle: number;
+  wheelRotation: number;
+  bedAngle: number;
+  bedLoad: number;
+  tirePressurePsi: number;
+  avgTireDeflection: number;
+  maxTireDeflection: number;
+  posX: number;
+  posZ: number;
+  heading: number;
+  pitch: number;
+}
+
 export interface JointSnapshot {
   swing: number; boom: number; stick: number; bucket: number; bucketFill: number;
   bladeHeight: number; bladeTilt: number; bladeAngle: number;
@@ -54,10 +72,11 @@ export interface RenderSnapshot {
 
 export interface TelemetryFrame {
   t: number;
-  active: 'excavator' | 'bulldozer' | 'none';
+  active: 'excavator' | 'bulldozer' | 'dumpTruck' | 'none';
   input: InputSnapshot;
   exc: PhysicsSnapshot;
   doz: PhysicsSnapshot;
+  truck?: DumpTruckSnapshot;
   joints: JointSnapshot;
   render: RenderSnapshot;
 }
