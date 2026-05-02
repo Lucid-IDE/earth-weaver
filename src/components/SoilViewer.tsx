@@ -787,11 +787,13 @@ function EquipmentController({
   const dozSmoke = Math.min(1,
     es.dozPhysics.engine.smoke * 0.7 +
     es.dozPhysics.engine.throttle * 0.25 + 0.05);
+  const truckSmoke = Math.min(1, Math.abs(es.dumpTruck.throttle) * 0.35 + es.dumpTruck.bedLoad * 0.08 + 0.04);
 
   return (
     <>
       <ExcavatorMesh state={es.excavator} exhaustIntensity={excSmoke} />
       <BulldozerMesh state={es.bulldozer} exhaustIntensity={dozSmoke} />
+      <DumpTruckMesh state={es.dumpTruck} exhaustIntensity={truckSmoke} />
     </>
   );
 }
