@@ -428,6 +428,7 @@ function EquipmentController({
     activeEquipment: EquipmentType;
     excavator: ExcavatorState;
     bulldozer: BulldozerState;
+    dumpTruck: DumpTruckState;
     impactMode: string | null;
     excPhysics: VehiclePhysicsState;
     dozPhysics: VehiclePhysicsState;
@@ -459,6 +460,7 @@ function EquipmentController({
     // Equipment switching
     if (ctrl.switchToExcavator) es.activeEquipment = 'excavator';
     if (ctrl.switchToBulldozer) es.activeEquipment = 'bulldozer';
+    if (ctrl.switchToDumpTruck) es.activeEquipment = 'dumpTruck';
     if (ctrl.switchToFreeCamera) es.activeEquipment = 'none';
     
     const clampedDt = Math.min(dt, 0.033);
