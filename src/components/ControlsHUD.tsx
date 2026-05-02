@@ -1,18 +1,19 @@
 // ── Dual Joystick Controls HUD ───────────────────────────────────────
 // Shows active equipment controls, current state, and keyboard mappings
 
-import { EquipmentType, ExcavatorState, BulldozerState } from '@/lib/equipment/types';
+import { EquipmentType, ExcavatorState, BulldozerState, DumpTruckState } from '@/lib/equipment/types';
 
 interface ControlsHUDProps {
   activeEquipment: EquipmentType;
   excavator: ExcavatorState;
   bulldozer: BulldozerState;
+  dumpTruck: DumpTruckState;
   impactMode: string | null;
 }
 
 const DEG = 180 / Math.PI;
 
-export default function ControlsHUD({ activeEquipment, excavator, bulldozer, impactMode }: ControlsHUDProps) {
+export default function ControlsHUD({ activeEquipment, excavator, bulldozer, dumpTruck, impactMode }: ControlsHUDProps) {
   return (
     <div className="absolute bottom-4 left-4 right-4 pointer-events-none z-40">
       <div className="flex items-end justify-between gap-4">
@@ -22,7 +23,8 @@ export default function ControlsHUD({ activeEquipment, excavator, bulldozer, imp
           <div className="flex gap-1.5">
             <EquipBtn label="1" name="Excavator" active={activeEquipment === 'excavator'} />
             <EquipBtn label="2" name="Bulldozer" active={activeEquipment === 'bulldozer'} />
-            <EquipBtn label="3" name="Free Cam" active={activeEquipment === 'none'} />
+            <EquipBtn label="3" name="Dump Truck" active={activeEquipment === 'dumpTruck'} />
+            <EquipBtn label="4" name="Free Cam" active={activeEquipment === 'none'} />
           </div>
           <div className="flex gap-1.5 mt-1.5">
             <ImpactBtn label="V" name="Impact" active={impactMode === 'impact'} />
@@ -33,6 +35,7 @@ export default function ControlsHUD({ activeEquipment, excavator, bulldozer, imp
         {/* Center: Active equipment controls */}
         {activeEquipment === 'excavator' && <ExcavatorHUD state={excavator} />}
         {activeEquipment === 'bulldozer' && <BulldozerHUD state={bulldozer} />}
+        {activeEquipment === 'dumpTruck' && <DumpTruckHUD state={dumpTruck} />}
         {activeEquipment === 'none' && (
           <div className="bg-card/85 backdrop-blur-sm border border-border rounded-md px-4 py-2">
             <div className="text-[10px] text-muted-foreground font-mono">FREE CAMERA</div>
@@ -66,6 +69,15 @@ export default function ControlsHUD({ activeEquipment, excavator, bulldozer, imp
                   {bulldozer.rippersDown ? '● DOWN' : '○ UP'}
                 </span>
               </div>
+            </div>
+          )}
+          {activeEquipment === 'dumpTruck' && (
+            <div className="space-y-0.5 text-[10px] font-mono">
+              <Gauge label="Load" value={dumpTruck.bedLoad} color="text-primary" />
+              <Gauge label="Bed" value={dumpTruck.bedAngle / (54 * Math.PI / 180)} color="text-accent" />
+              <div className="text-muted-foreground">PSI: <span className="text-foreground">{dumpTruck.tirePressurePsi.toFixed(0)}</span></div>
+              <div className="text-muted-foreground">Tire defl: <span className="text-foreground">{(Math.max(...dumpTruck.tireDeflection) * 1000).toFixed(1)}mm</span></div>
+              <div className="text-muted-foreground">Gate: <span className={dumpTruck.tailgateOpen ? "text-accent" : "text-muted-foreground"}>{dumpTruck.tailgateOpen ? 'OPEN' : 'SHUT'}</span></div>
             </div>
           )}
         </div>
@@ -158,6 +170,35 @@ function BulldozerHUD({ state }: { state: BulldozerState }) {
           <Key k="H" label="Ang→" />
           <Key k="X" label="Rippers" />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function DumpTruckHUD({ state }: { state: DumpTruckState }) {
+  return (
+    <div className="bg-card/85 backdrop-blur-sm border border-border rounded-md px-4 py-2 flex gap-6">
+      <div>
+        <div className="text-[10px] text-muted-foreground font-mono mb-1">DRIVE</div>
+        <div className="grid grid-cols-3 gap-0.5 text-[9px] font-mono text-center w-[90px]">
+          <div />
+          <Key k="↑" label="Fwd" />
+          <div />
+          <Key k="←" label="Steer L" />
+          <Key k="↓" label="Rev" />
+          <Key k="→" label="Steer R" />
+        </div>
+      </div>
+      <div>
+        <div className="text-[10px] text-muted-foreground font-mono mb-1">DUMP BODY</div>
+        <div className="flex gap-1 text-[9px] font-mono flex-wrap max-w-[160px]">
+          <Key k="R" label="Raise" />
+          <Key k="F" label="Lower" />
+          <Key k="X" label="Gate" />
+          <Key k="T/G" label="PSI -/+" />
+          <Key k="Y/H" label="Load -/+" />
+        </div>
+        <div className="text-[8px] text-muted-foreground mt-1">{state.engineRpm.toFixed(0)} rpm · {(state.vehicle.speed * 100).toFixed(1)} cm/s</div>
       </div>
     </div>
   );

@@ -21,10 +21,11 @@ import {
 } from '@/lib/rendering/fluidShaders';
 
 // Equipment
-import { EquipmentType, ExcavatorState, BulldozerState } from '@/lib/equipment/types';
+import { EquipmentType, ExcavatorState, BulldozerState, DumpTruckState } from '@/lib/equipment/types';
 import { createExcavatorState, updateExcavator, computeExcavatorFK } from '@/lib/equipment/excavator';
 import { createBulldozerState, updateBulldozer } from '@/lib/equipment/bulldozer';
-import { initControls, pollControls, getExcavatorInputs, getBulldozerInputs } from '@/lib/equipment/controls';
+import { createDumpTruckState, updateDumpTruck } from '@/lib/equipment/dumpTruck';
+import { initControls, pollControls, getExcavatorInputs, getBulldozerInputs, getDumpTruckInputs } from '@/lib/equipment/controls';
 import { excavatorDig, bulldozerPush, updateVehicleTerrainFollow, initVehicleOnTerrain } from '@/lib/equipment/terrainInteraction';
 import { craterImpact, explosiveImpact } from '@/lib/equipment/impacts';
 import {
@@ -34,7 +35,7 @@ import {
 } from '@/lib/equipment/vehiclePhysics';
 import { getTerramechParams } from '@/lib/equipment/terramechanics';
 import { applyChassisTorque } from '@/lib/equipment/rigidBody';
-import { ExcavatorMesh, BulldozerMesh } from '@/components/EquipmentRenderer';
+import { ExcavatorMesh, BulldozerMesh, DumpTruckMesh } from '@/components/EquipmentRenderer';
 import MpmHeatmapOverlay from '@/components/MpmHeatmapOverlay';
 import {
   createSpawnDrop, elevateForSpawn, stepSpawnDrop, SpawnDropState,
@@ -56,6 +57,7 @@ export interface EquipmentStats {
   activeEquipment: EquipmentType;
   excavator: ExcavatorState;
   bulldozer: BulldozerState;
+  dumpTruck: DumpTruckState;
   impactMode: string | null;
 }
 
@@ -426,6 +428,7 @@ function EquipmentController({
     activeEquipment: EquipmentType;
     excavator: ExcavatorState;
     bulldozer: BulldozerState;
+    dumpTruck: DumpTruckState;
     impactMode: string | null;
     excPhysics: VehiclePhysicsState;
     dozPhysics: VehiclePhysicsState;
@@ -457,6 +460,7 @@ function EquipmentController({
     // Equipment switching
     if (ctrl.switchToExcavator) es.activeEquipment = 'excavator';
     if (ctrl.switchToBulldozer) es.activeEquipment = 'bulldozer';
+    if (ctrl.switchToDumpTruck) es.activeEquipment = 'dumpTruck';
     if (ctrl.switchToFreeCamera) es.activeEquipment = 'none';
     
     const clampedDt = Math.min(dt, 0.033);
@@ -589,6 +593,35 @@ function EquipmentController({
       }
     }
 
+    if (es.activeEquipment === 'dumpTruck') {
+      const inputs = getDumpTruckInputs(ctrl);
+      updateDumpTruck(es.dumpTruck, clampedDt, inputs);
+      updateVehicleTerrainFollow(es.dumpTruck.vehicle, field, clampedDt, {
+        trackWidth: 0.136, trackLength: 0.24, rideHeight: 0.032,
+        loadFactor: 0.9 + es.dumpTruck.bedLoad * 1.6,
+        followSharpness: 0.45, maxDropSpeed: 0.55,
+        allowTrackMarks: false,
+      });
+      if (!excFalling) {
+        updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
+          trackWidth: 0.082, trackLength: 0.16, rideHeight: 0.014,
+          loadFactor: 0.95, allowTrackMarks: false,
+        });
+      }
+      if (!dozFalling) {
+        updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
+          trackWidth: 0.105, trackLength: 0.20, rideHeight: 0.016,
+          loadFactor: 1.2, allowTrackMarks: false,
+        });
+      }
+    } else {
+      updateVehicleTerrainFollow(es.dumpTruck.vehicle, field, clampedDt, {
+        trackWidth: 0.136, trackLength: 0.24, rideHeight: 0.032,
+        loadFactor: 0.9 + es.dumpTruck.bedLoad * 1.6,
+        allowTrackMarks: false,
+      });
+    }
+
     // Overlay rigid-body dynamic pitch on top of terrain-following pitch
     es.excavator.vehicle.pitch += es.excPhysics.rigidBody.pitchAccum;
     es.bulldozer.vehicle.pitch += es.dozPhysics.rigidBody.pitchAccum;
@@ -629,6 +662,15 @@ function EquipmentController({
       slip: es.dozPhysics.slipAmount,
       active: es.activeEquipment === 'bulldozer',
     });
+    updateVehicleAudio('dumpTruck', {
+      rpm: es.dumpTruck.engineRpm, maxRpm: 2200, throttle: Math.abs(es.dumpTruck.throttle),
+      lugging: es.dumpTruck.bedLoad > 0.75 && Math.abs(es.dumpTruck.throttle) > 0.7,
+      stalled: false, hydPressure: es.dumpTruck.bedAngle > 0.02 ? 0.85 : 0,
+      hydFlow: Math.abs(getDumpTruckInputs(ctrl).dumpBed), reliefOpen: false,
+      trackSpeed: Math.min(1, Math.abs(es.dumpTruck.vehicle.speed) / 0.38),
+      slip: Math.max(0, 72 / es.dumpTruck.tirePressurePsi - 1) * 0.4,
+      active: es.activeEquipment === 'dumpTruck',
+    });
 
     if (terrainChanged) {
       rebuildMesh();
@@ -660,7 +702,8 @@ function EquipmentController({
     const fps = clampedDt > 0 ? Math.min(120, 1 / clampedDt) : 0;
     const sim2 = simRef.current;
     const exP = es.excPhysics, dzP = es.dozPhysics;
-    const exV = es.excavator.vehicle, dzV = es.bulldozer.vehicle;
+    const exV = es.excavator.vehicle, dzV = es.bulldozer.vehicle, trV = es.dumpTruck.vehicle;
+    const avgTire = es.dumpTruck.tireDeflection.reduce((a, b) => a + b, 0) / 4;
     const frame: TelemetryFrame = {
       t: now,
       active: es.activeEquipment,
@@ -681,8 +724,9 @@ function EquipmentController({
           bladeTilt: (ctrl.bladeTiltRight ? 1 : 0) + (ctrl.bladeTiltLeft ? -1 : 0),
           bladeAngle: (ctrl.bladeAngleRight ? 1 : 0) + (ctrl.bladeAngleLeft ? -1 : 0),
         },
+        truck: { ...getDumpTruckInputs(ctrl), bedLoad: es.dumpTruck.bedLoad, tirePressurePsi: es.dumpTruck.tirePressurePsi },
         events: {
-          switchExc: ctrl.switchToExcavator, switchDoz: ctrl.switchToBulldozer,
+          switchExc: ctrl.switchToExcavator, switchDoz: ctrl.switchToBulldozer, switchTruck: ctrl.switchToDumpTruck,
           switchFree: ctrl.switchToFreeCamera, impact: ctrl.triggerImpact, explosion: ctrl.triggerExplosion,
         },
       },
@@ -710,6 +754,14 @@ function EquipmentController({
         groundResistance: dzP.groundResistance,
         posX: dzV.posX, posZ: dzV.posZ, heading: dzV.heading, pitch: dzV.pitch,
       },
+      truck: {
+        rpm: es.dumpTruck.engineRpm, throttle: es.dumpTruck.throttle,
+        forwardVel: trV.speed, steeringAngle: es.dumpTruck.steeringAngle,
+        wheelRotation: es.dumpTruck.wheelRotation, bedAngle: es.dumpTruck.bedAngle,
+        bedLoad: es.dumpTruck.bedLoad, tirePressurePsi: es.dumpTruck.tirePressurePsi,
+        avgTireDeflection: avgTire, maxTireDeflection: Math.max(...es.dumpTruck.tireDeflection),
+        posX: trV.posX, posZ: trV.posZ, heading: trV.heading, pitch: trV.pitch,
+      },
       joints: {
         swing: es.excavator.swing.angle, boom: es.excavator.boom.angle,
         stick: es.excavator.stick.angle, bucket: es.excavator.bucket.angle,
@@ -735,11 +787,13 @@ function EquipmentController({
   const dozSmoke = Math.min(1,
     es.dozPhysics.engine.smoke * 0.7 +
     es.dozPhysics.engine.throttle * 0.25 + 0.05);
+  const truckSmoke = Math.min(1, Math.abs(es.dumpTruck.throttle) * 0.35 + es.dumpTruck.bedLoad * 0.08 + 0.04);
 
   return (
     <>
       <ExcavatorMesh state={es.excavator} exhaustIntensity={excSmoke} />
       <BulldozerMesh state={es.bulldozer} exhaustIntensity={dozSmoke} />
+      <DumpTruckMesh state={es.dumpTruck} exhaustIntensity={truckSmoke} />
     </>
   );
 }
@@ -779,6 +833,7 @@ function SoilTerrain({
     activeEquipment: 'none' as EquipmentType,
     excavator: createExcavatorState(),
     bulldozer: createBulldozerState(),
+    dumpTruck: createDumpTruckState(),
     impactMode: null as string | null,
     excPhysics: createVehiclePhysics(createExcavatorMass(), 7.5, 2200),
     dozPhysics: createVehiclePhysics(createBulldozerMass(), 9.0, 2100),
@@ -847,6 +902,9 @@ function SoilTerrain({
     });
     initVehicleOnTerrain(es.bulldozer.vehicle, field, {
       trackWidth: 0.105, trackLength: 0.20, rideHeight: 0.016,
+    });
+    initVehicleOnTerrain(es.dumpTruck.vehicle, field, {
+      trackWidth: 0.136, trackLength: 0.24, rideHeight: 0.032,
     });
     elevateForSpawn(es.excavator.vehicle, field, es.excDrop, 0.014);
     elevateForSpawn(es.bulldozer.vehicle, field, es.dozDrop, 0.016);
@@ -924,6 +982,7 @@ function SoilTerrain({
         activeEquipment: equipmentState.current.activeEquipment,
         excavator: equipmentState.current.excavator,
         bulldozer: equipmentState.current.bulldozer,
+        dumpTruck: equipmentState.current.dumpTruck,
         impactMode: equipmentState.current.impactMode,
       });
     }

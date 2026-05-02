@@ -149,6 +149,25 @@ export default function DiagnosticPanel({ open, onClose }: { open: boolean; onCl
 
         <Section id="drive" title={`Drivetrain — ${frame?.active ?? '—'}`}>
           {frame && (() => {
+            if (frame.active === 'dumpTruck' && frame.truck) {
+              const t = frame.truck;
+              return (
+                <>
+                  <Row k="rpm" v={t.rpm.toFixed(0)} hi={t.rpm > 900} />
+                  <Row k="throttle" v={t.throttle} />
+                  <Row k="forward v" v={t.forwardVel} hi={Math.abs(t.forwardVel) > 0.005} />
+                  <Row k="steer°" v={(t.steeringAngle * 180 / Math.PI).toFixed(1)} />
+                  <Row k="wheel rot" v={t.wheelRotation} />
+                  <Row k="bed°" v={(t.bedAngle * 180 / Math.PI).toFixed(1)} hi={t.bedAngle > 0.05} />
+                  <Row k="load" v={t.bedLoad} />
+                  <Row k="tire psi" v={t.tirePressurePsi.toFixed(0)} />
+                  <Row k="avg tire defl" v={`${(t.avgTireDeflection * 1000).toFixed(1)}mm`} hi={t.avgTireDeflection > 0.004} />
+                  <Row k="max tire defl" v={`${(t.maxTireDeflection * 1000).toFixed(1)}mm`} hi={t.maxTireDeflection > 0.006} />
+                  <Row k="pos" v={`${t.posX.toFixed(3)}, ${t.posZ.toFixed(3)}`} />
+                  <Row k="heading°" v={(t.heading * 180 / Math.PI).toFixed(1)} />
+                </>
+              );
+            }
             const p = frame.active === 'bulldozer' ? frame.doz : frame.exc;
             return (
               <>

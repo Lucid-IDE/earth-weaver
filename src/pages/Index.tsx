@@ -66,6 +66,7 @@ export default function Index() {
           activeEquipment={equipmentStats.activeEquipment}
           excavator={equipmentStats.excavator}
           bulldozer={equipmentStats.bulldozer}
+            dumpTruck={equipmentStats.dumpTruck}
           impactMode={equipmentStats.impactMode}
         />
       )}

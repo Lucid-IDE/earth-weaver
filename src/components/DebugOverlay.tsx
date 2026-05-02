@@ -27,10 +27,12 @@ export default function DebugOverlay({ stats, equipment }: DebugOverlayProps) {
               ? 'Click terrain to dig · Scroll to zoom'
               : activeEquip === 'excavator'
               ? '🏗️ Excavator — WASD+IJKL tracks, RF boom, JL stick, QE bucket'
+               : activeEquip === 'dumpTruck'
+               ? '🚚 Dump Truck — arrows drive/steer, RF bed, X gate, TG PSI, YH load'
               : '🚜 Bulldozer — WASD+IK tracks, RF blade, TG tilt'
             }
           </p>
-          <p>Left-drag orbit · Right-drag pan · [1] Excavator [2] Dozer [3] Free</p>
+          <p>Left-drag orbit · Right-drag pan · [1] Excavator [2] Dozer [3] Truck [4] Free</p>
           <p className="text-destructive/80">[V] Impact crater · [B] Explosion</p>
         </div>
         <div className="border-t border-border pt-2 text-[10px] text-muted-foreground font-mono space-y-0.5">
@@ -51,7 +53,7 @@ export default function DebugOverlay({ stats, equipment }: DebugOverlayProps) {
             </>
           )}
           <p>equipment: <span className={activeEquip !== 'none' ? "text-primary" : "text-muted-foreground"}>
-            {activeEquip === 'excavator' ? '● Excavator' : activeEquip === 'bulldozer' ? '● Bulldozer' : '○ none'}
+            {activeEquip === 'excavator' ? '● Excavator' : activeEquip === 'bulldozer' ? '● Bulldozer' : activeEquip === 'dumpTruck' ? '● Dump Truck' : '○ none'}
           </span></p>
         </div>
       </div>

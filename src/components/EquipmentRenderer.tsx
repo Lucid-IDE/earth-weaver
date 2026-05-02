@@ -5,7 +5,7 @@
 import { useRef, useMemo } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { ExcavatorState, BulldozerState } from '@/lib/equipment/types';
+import { ExcavatorState, BulldozerState, DumpTruckState } from '@/lib/equipment/types';
 import { computeExcavatorLocalFK } from '@/lib/equipment/excavator';
 
 // ── Shared Materials (cached) ───────────────────────────────────────
@@ -976,6 +976,84 @@ export function BulldozerMesh({
         <torusGeometry args={[0.008, 0.003, 6, 8, Math.PI]} />
         <meshStandardMaterial color={COLORS.medSteel} metalness={0.7} roughness={0.4} />
       </mesh>
+    </group>
+  );
+}
+
+function RubberTire({ radius, width, deflection, rotation, steer = 0 }: {
+  radius: number; width: number; deflection: number; rotation: number; steer?: number;
+}) {
+  const squash = Math.max(0.68, 1 - deflection * 9);
+  const bulge = 1 + deflection * 5.5;
+  return (
+    <group rotation={[0, steer, 0]}>
+      <group rotation={[Math.PI / 2, 0, rotation]} scale={[bulge, squash, bulge]}>
+        <mesh>
+          <torusGeometry args={[radius, width * 0.34, 12, 28]} />
+          <meshStandardMaterial color={COLORS.rubber} metalness={0.05} roughness={0.92} />
+        </mesh>
+        {Array.from({ length: 18 }).map((_, i) => {
+          const a = (i / 18) * Math.PI * 2;
+          return (
+            <mesh key={i} position={[Math.cos(a) * radius, Math.sin(a) * radius, 0]} rotation={[0, 0, a]}>
+              <boxGeometry args={[0.0045, 0.012, width * 0.95]} />
+              <meshStandardMaterial color={COLORS.darkSteel} metalness={0.05} roughness={0.95} />
+            </mesh>
+          );
+        })}
+      </group>
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[radius * 0.42, radius * 0.42, width * 1.08, 16]} />
+        <meshStandardMaterial color={COLORS.medSteel} metalness={0.75} roughness={0.32} />
+      </mesh>
+    </group>
+  );
+}
+
+export function DumpTruckMesh({ state, exhaustIntensity = 0 }: { state: DumpTruckState; exhaustIntensity?: number }) {
+  const v = state.vehicle;
+  const bedLift = Math.sin(state.bedAngle) * 0.05;
+  const payloadY = 0.073 + bedLift * 0.55;
+
+  return (
+    <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
+      <BoxAt pos={[0, 0.032, -0.025]} size={[0.14, 0.018, 0.24]} color={COLORS.darkSteel} />
+      <BoxAt pos={[0, 0.052, 0.075]} size={[0.105, 0.055, 0.095]} color={COLORS.catYellow} />
+      <BoxAt pos={[0, 0.078, 0.112]} size={[0.09, 0.036, 0.03]} color={COLORS.glass} metalness={0.1} roughness={0.05} />
+      <BoxAt pos={[-0.055, 0.076, 0.075]} size={[0.003, 0.032, 0.052]} color={COLORS.glass} metalness={0.1} roughness={0.05} />
+      <BoxAt pos={[0.055, 0.076, 0.075]} size={[0.003, 0.032, 0.052]} color={COLORS.glass} metalness={0.1} roughness={0.05} />
+      <BoxAt pos={[0, 0.05, 0.145]} size={[0.11, 0.038, 0.035]} color={COLORS.catYellow} />
+      <BoxAt pos={[0, 0.06, 0.165]} size={[0.095, 0.026, 0.004]} color={COLORS.darkSteel} />
+      <mesh position={[0.046, 0.095, 0.03]}>
+        <cylinderGeometry args={[0.004, 0.004, 0.06, 8]} />
+        <meshStandardMaterial color={COLORS.exhaust} metalness={0.6} roughness={0.45} />
+      </mesh>
+      <ExhaustSmoke origin={[0.046, 0.13, 0.03]} intensity={exhaustIntensity} />
+
+      <group position={[0, 0.065, -0.075]} rotation={[state.bedAngle, 0, 0]}>
+        <BoxAt pos={[0, 0, 0]} size={[0.135, 0.012, 0.19]} color={COLORS.catYellowDark} />
+        <BoxAt pos={[-0.071, 0.026, 0]} size={[0.006, 0.06, 0.19]} color={COLORS.catYellow} />
+        <BoxAt pos={[0.071, 0.026, 0]} size={[0.006, 0.06, 0.19]} color={COLORS.catYellow} />
+        <BoxAt pos={[0, 0.026, -0.096]} size={[0.135, 0.06, 0.006]} color={state.tailgateOpen ? COLORS.medSteel : COLORS.catYellow} rotation={[state.tailgateOpen ? -0.9 : 0, 0, 0]} />
+        {state.bedLoad > 0.02 && (
+          <mesh position={[0, payloadY - 0.065, -0.005]}>
+            <boxGeometry args={[0.118, 0.036 * state.bedLoad, 0.15]} />
+            <meshStandardMaterial color="#6b5a3d" metalness={0.04} roughness={0.96} />
+          </mesh>
+        )}
+      </group>
+      <HydraulicCylinder start={[0, 0.043, -0.02]} end={[0, 0.066 + bedLift, -0.105]} bodyRadius={0.005} rodRadius={0.003} pressure={state.bedAngle > 0.02 ? 0.85 : 0.2} />
+
+      {[
+        [-0.068, 0.014 - state.suspensionCompression[0], 0.095, true, 0],
+        [0.068, 0.014 - state.suspensionCompression[1], 0.095, true, 1],
+        [-0.068, 0.014 - state.suspensionCompression[2], -0.095, false, 2],
+        [0.068, 0.014 - state.suspensionCompression[3], -0.095, false, 3],
+      ].map(([x, y, z, front, idx]) => (
+        <group key={idx as number} position={[x as number, y as number, z as number]}>
+          <RubberTire radius={0.032} width={0.026} deflection={state.tireDeflection[idx as number]} rotation={state.wheelRotation} steer={front ? state.steeringAngle : 0} />
+        </group>
+      ))}
     </group>
   );
 }
