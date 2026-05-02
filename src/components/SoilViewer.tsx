@@ -783,6 +783,7 @@ function SoilTerrain({
     activeEquipment: 'none' as EquipmentType,
     excavator: createExcavatorState(),
     bulldozer: createBulldozerState(),
+    dumpTruck: createDumpTruckState(),
     impactMode: null as string | null,
     excPhysics: createVehiclePhysics(createExcavatorMass(), 7.5, 2200),
     dozPhysics: createVehiclePhysics(createBulldozerMass(), 9.0, 2100),
@@ -851,6 +852,9 @@ function SoilTerrain({
     });
     initVehicleOnTerrain(es.bulldozer.vehicle, field, {
       trackWidth: 0.105, trackLength: 0.20, rideHeight: 0.016,
+    });
+    initVehicleOnTerrain(es.dumpTruck.vehicle, field, {
+      trackWidth: 0.136, trackLength: 0.24, rideHeight: 0.032,
     });
     elevateForSpawn(es.excavator.vehicle, field, es.excDrop, 0.014);
     elevateForSpawn(es.bulldozer.vehicle, field, es.dozDrop, 0.016);
@@ -928,6 +932,7 @@ function SoilTerrain({
         activeEquipment: equipmentState.current.activeEquipment,
         excavator: equipmentState.current.excavator,
         bulldozer: equipmentState.current.bulldozer,
+        dumpTruck: equipmentState.current.dumpTruck,
         impactMode: equipmentState.current.impactMode,
       });
     }
