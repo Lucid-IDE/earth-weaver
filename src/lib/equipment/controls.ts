@@ -53,6 +53,7 @@ export interface ControlInputs {
   // Equipment switching
   switchToExcavator: boolean;
   switchToBulldozer: boolean;
+  switchToDumpTruck: boolean;
   switchToFreeCamera: boolean;
   
   // Impact
@@ -130,7 +131,8 @@ export function pollControls(): ControlInputs {
     // Equipment switching
     switchToExcavator: wasJustPressed('Digit1'),
     switchToBulldozer: wasJustPressed('Digit2'),
-    switchToFreeCamera: wasJustPressed('Digit3'),
+    switchToDumpTruck: wasJustPressed('Digit3'),
+    switchToFreeCamera: wasJustPressed('Digit4'),
     
     // Impact
     triggerImpact: wasJustPressed('KeyV'),
@@ -181,5 +183,20 @@ export function getBulldozerInputs(ctrl: ControlInputs) {
     bladeTiltInput: (ctrl.bladeTiltRight ? 1 : 0) + (ctrl.bladeTiltLeft ? -1 : 0),
     bladeAngleInput: (ctrl.bladeAngleRight ? 1 : 0) + (ctrl.bladeAngleLeft ? -1 : 0),
     toggleRippers: ctrl.toggleRippers,
+  };
+}
+
+export function getDumpTruckInputs(ctrl: ControlInputs) {
+  const drive = (ctrl.bothForward ? 1 : 0) + (ctrl.bothBackward ? -1 : 0);
+  const steer = (ctrl.pivotLeft ? 1 : 0) + (ctrl.pivotRight ? -1 : 0);
+  return {
+    throttle: Math.max(-1, Math.min(1, drive)),
+    steer: Math.max(-1, Math.min(1, steer)),
+    dumpBed: (ctrl.boomUp ? 1 : 0) + (ctrl.boomDown ? -1 : 0),
+    toggleTailgate: ctrl.toggleRippers,
+    pressureDown: ctrl.bladeTiltLeft,
+    pressureUp: ctrl.bladeTiltRight,
+    loadAdd: ctrl.bladeAngleRight,
+    loadDump: ctrl.bladeAngleLeft,
   };
 }
