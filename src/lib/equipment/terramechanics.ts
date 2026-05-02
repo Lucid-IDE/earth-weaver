@@ -23,6 +23,7 @@ export interface SoilTerramechParams {
 //  output sinkage lands in the 0–8 mm range that looks right at our
 //  world scale where 1.0 ≈ 2 m).
 const SCALE = 1 / 6500; // empirical pressure→sink gain for this sim
+const RESISTANCE_SCALE = 0.00045; // compaction drag tuned to scaled vehicle forces
 
 export function getTerramechParams(
   frictionAngle: number,
@@ -133,7 +134,8 @@ export function computeTrackForces(
              / (params.n + 1)
              * Math.pow(Math.max(0, sinkage / (SCALE * 600)), params.n + 1);
   // Per-track resistance (scaled back into our force units)
-  const resistance = Rc * SCALE * 600 * trackLength * 8; // tunable gain
+  const rollingDrag = Math.abs(vehicleVelocity) * totalLoad * 0.025;
+  const resistance = Rc * SCALE * 600 * trackLength * RESISTANCE_SCALE + rollingDrag;
 
   // Shear mobilization 0..1
   const tauMax = params.c + p * Math.tan(params.phi);
