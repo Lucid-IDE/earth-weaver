@@ -21,10 +21,11 @@ import {
 } from '@/lib/rendering/fluidShaders';
 
 // Equipment
-import { EquipmentType, ExcavatorState, BulldozerState } from '@/lib/equipment/types';
+import { EquipmentType, ExcavatorState, BulldozerState, DumpTruckState } from '@/lib/equipment/types';
 import { createExcavatorState, updateExcavator, computeExcavatorFK } from '@/lib/equipment/excavator';
 import { createBulldozerState, updateBulldozer } from '@/lib/equipment/bulldozer';
-import { initControls, pollControls, getExcavatorInputs, getBulldozerInputs } from '@/lib/equipment/controls';
+import { createDumpTruckState, updateDumpTruck } from '@/lib/equipment/dumpTruck';
+import { initControls, pollControls, getExcavatorInputs, getBulldozerInputs, getDumpTruckInputs } from '@/lib/equipment/controls';
 import { excavatorDig, bulldozerPush, updateVehicleTerrainFollow, initVehicleOnTerrain } from '@/lib/equipment/terrainInteraction';
 import { craterImpact, explosiveImpact } from '@/lib/equipment/impacts';
 import {
@@ -34,7 +35,7 @@ import {
 } from '@/lib/equipment/vehiclePhysics';
 import { getTerramechParams } from '@/lib/equipment/terramechanics';
 import { applyChassisTorque } from '@/lib/equipment/rigidBody';
-import { ExcavatorMesh, BulldozerMesh } from '@/components/EquipmentRenderer';
+import { ExcavatorMesh, BulldozerMesh, DumpTruckMesh } from '@/components/EquipmentRenderer';
 import MpmHeatmapOverlay from '@/components/MpmHeatmapOverlay';
 import {
   createSpawnDrop, elevateForSpawn, stepSpawnDrop, SpawnDropState,
@@ -56,6 +57,7 @@ export interface EquipmentStats {
   activeEquipment: EquipmentType;
   excavator: ExcavatorState;
   bulldozer: BulldozerState;
+  dumpTruck: DumpTruckState;
   impactMode: string | null;
 }
 
