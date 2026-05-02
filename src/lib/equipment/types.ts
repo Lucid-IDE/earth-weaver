@@ -74,12 +74,27 @@ export interface BulldozerState {
   cylinders: BulldozerCylinders;
 }
 
-export type EquipmentType = 'excavator' | 'bulldozer' | 'none';
+export interface DumpTruckState {
+  vehicle: VehicleState;
+  steeringAngle: number;
+  wheelRotation: number;
+  bedAngle: number;
+  bedLoad: number;
+  tirePressurePsi: number;
+  tailgateOpen: boolean;
+  suspensionCompression: [number, number, number, number];
+  tireDeflection: [number, number, number, number];
+  engineRpm: number;
+  throttle: number;
+}
+
+export type EquipmentType = 'excavator' | 'bulldozer' | 'dumpTruck' | 'none';
 
 export interface EquipmentControlState {
   activeEquipment: EquipmentType;
   excavator: ExcavatorState;
   bulldozer: BulldozerState;
+  dumpTruck: DumpTruckState;
 }
 
 export const DEG = Math.PI / 180;
