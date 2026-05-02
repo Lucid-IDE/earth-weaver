@@ -662,6 +662,15 @@ function EquipmentController({
       slip: es.dozPhysics.slipAmount,
       active: es.activeEquipment === 'bulldozer',
     });
+    updateVehicleAudio('dumpTruck', {
+      rpm: es.dumpTruck.engineRpm, maxRpm: 2200, throttle: Math.abs(es.dumpTruck.throttle),
+      lugging: es.dumpTruck.bedLoad > 0.75 && Math.abs(es.dumpTruck.throttle) > 0.7,
+      stalled: false, hydPressure: es.dumpTruck.bedAngle > 0.02 ? 0.85 : 0,
+      hydFlow: Math.abs(getDumpTruckInputs(ctrl).dumpBed), reliefOpen: false,
+      trackSpeed: Math.min(1, Math.abs(es.dumpTruck.vehicle.speed) / 0.38),
+      slip: Math.max(0, 72 / es.dumpTruck.tirePressurePsi - 1) * 0.4,
+      active: es.activeEquipment === 'dumpTruck',
+    });
 
     if (terrainChanged) {
       rebuildMesh();
@@ -693,7 +702,8 @@ function EquipmentController({
     const fps = clampedDt > 0 ? Math.min(120, 1 / clampedDt) : 0;
     const sim2 = simRef.current;
     const exP = es.excPhysics, dzP = es.dozPhysics;
-    const exV = es.excavator.vehicle, dzV = es.bulldozer.vehicle;
+    const exV = es.excavator.vehicle, dzV = es.bulldozer.vehicle, trV = es.dumpTruck.vehicle;
+    const avgTire = es.dumpTruck.tireDeflection.reduce((a, b) => a + b, 0) / 4;
     const frame: TelemetryFrame = {
       t: now,
       active: es.activeEquipment,
@@ -714,8 +724,9 @@ function EquipmentController({
           bladeTilt: (ctrl.bladeTiltRight ? 1 : 0) + (ctrl.bladeTiltLeft ? -1 : 0),
           bladeAngle: (ctrl.bladeAngleRight ? 1 : 0) + (ctrl.bladeAngleLeft ? -1 : 0),
         },
+        truck: { ...getDumpTruckInputs(ctrl), bedLoad: es.dumpTruck.bedLoad, tirePressurePsi: es.dumpTruck.tirePressurePsi },
         events: {
-          switchExc: ctrl.switchToExcavator, switchDoz: ctrl.switchToBulldozer,
+          switchExc: ctrl.switchToExcavator, switchDoz: ctrl.switchToBulldozer, switchTruck: ctrl.switchToDumpTruck,
           switchFree: ctrl.switchToFreeCamera, impact: ctrl.triggerImpact, explosion: ctrl.triggerExplosion,
         },
       },
@@ -742,6 +753,14 @@ function EquipmentController({
         leftSinkage: dzP.leftSinkage, rightSinkage: dzP.rightSinkage,
         groundResistance: dzP.groundResistance,
         posX: dzV.posX, posZ: dzV.posZ, heading: dzV.heading, pitch: dzV.pitch,
+      },
+      truck: {
+        rpm: es.dumpTruck.engineRpm, throttle: es.dumpTruck.throttle,
+        forwardVel: trV.speed, steeringAngle: es.dumpTruck.steeringAngle,
+        wheelRotation: es.dumpTruck.wheelRotation, bedAngle: es.dumpTruck.bedAngle,
+        bedLoad: es.dumpTruck.bedLoad, tirePressurePsi: es.dumpTruck.tirePressurePsi,
+        avgTireDeflection: avgTire, maxTireDeflection: Math.max(...es.dumpTruck.tireDeflection),
+        posX: trV.posX, posZ: trV.posZ, heading: trV.heading, pitch: trV.pitch,
       },
       joints: {
         swing: es.excavator.swing.angle, boom: es.excavator.boom.angle,
