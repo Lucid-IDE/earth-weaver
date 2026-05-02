@@ -593,6 +593,35 @@ function EquipmentController({
       }
     }
 
+    if (es.activeEquipment === 'dumpTruck') {
+      const inputs = getDumpTruckInputs(ctrl);
+      updateDumpTruck(es.dumpTruck, clampedDt, inputs);
+      updateVehicleTerrainFollow(es.dumpTruck.vehicle, field, clampedDt, {
+        trackWidth: 0.136, trackLength: 0.24, rideHeight: 0.032,
+        loadFactor: 0.9 + es.dumpTruck.bedLoad * 1.6,
+        followSharpness: 0.45, maxDropSpeed: 0.55,
+        allowTrackMarks: false,
+      });
+      if (!excFalling) {
+        updateVehicleTerrainFollow(es.excavator.vehicle, field, clampedDt, {
+          trackWidth: 0.082, trackLength: 0.16, rideHeight: 0.014,
+          loadFactor: 0.95, allowTrackMarks: false,
+        });
+      }
+      if (!dozFalling) {
+        updateVehicleTerrainFollow(es.bulldozer.vehicle, field, clampedDt, {
+          trackWidth: 0.105, trackLength: 0.20, rideHeight: 0.016,
+          loadFactor: 1.2, allowTrackMarks: false,
+        });
+      }
+    } else {
+      updateVehicleTerrainFollow(es.dumpTruck.vehicle, field, clampedDt, {
+        trackWidth: 0.136, trackLength: 0.24, rideHeight: 0.032,
+        loadFactor: 0.9 + es.dumpTruck.bedLoad * 1.6,
+        allowTrackMarks: false,
+      });
+    }
+
     // Overlay rigid-body dynamic pitch on top of terrain-following pitch
     es.excavator.vehicle.pitch += es.excPhysics.rigidBody.pitchAccum;
     es.bulldozer.vehicle.pitch += es.dozPhysics.rigidBody.pitchAccum;
