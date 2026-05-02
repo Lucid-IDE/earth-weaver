@@ -27,6 +27,7 @@ const ALL_KEYS = [
   'KeyW','KeyS','KeyA','KeyD','KeyI','KeyK','KeyJ','KeyL',
   'KeyR','KeyF','KeyQ','KeyE','KeyT','KeyG','KeyY','KeyH',
   'ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','KeyV','KeyB',
+  'Digit1','Digit2','Digit3','Digit4','KeyX',
 ];
 
 function snap(): TelemetryFrame | null { return telemetryBus.getLatest(); }
@@ -201,6 +202,27 @@ export class DiagnosticTestRunner {
       (b, a) => a.joints.bladeHeight - b.joints.bladeHeight,
       (d) => Math.abs(d) > 0.001, 'blade Δm');
 
+    const rSwitch3 = makeResult('switch-truck', 'Switch to Dump Truck (Digit3)', 'active === dumpTruck');
+    this.results.push(rSwitch3);
+    await this.runTest(rSwitch3, async () => {
+      await tapKey('Digit3');
+      await wait(120);
+      const f = snap();
+      return f && f.active === 'dumpTruck'
+        ? { pass: true, measured: `active=${f.active}` }
+        : { pass: false, measured: `active=${f?.active}` };
+    });
+
+    await this.driveTest('truck-fwd', 'Dump truck forward (ArrowUp)', 'ArrowUp', 800,
+      (b, a) => (a.truck?.forwardVel ?? 0) - (b.truck?.forwardVel ?? 0),
+      (d) => d > 0.015, 'forwardVel Δ', 'dumpTruck');
+    await this.driveTest('truck-steer', 'Dump truck steering (ArrowLeft)', 'ArrowLeft', 600,
+      (b, a) => (a.truck?.steeringAngle ?? 0) - (b.truck?.steeringAngle ?? 0),
+      (d) => d > 0.05, 'steer Δrad', 'dumpTruck');
+    await this.jointTest('truck-bed', 'Dump bed raise (R)', 'KeyR', 700,
+      (b, a) => (a.truck?.bedAngle ?? 0) - (b.truck?.bedAngle ?? 0),
+      (d) => d > 0.05, 'bed Δrad');
+
     // ── Render health ──
     const rRender = makeResult('render-fps', 'Render FPS reasonable', 'fps >= 20');
     this.results.push(rRender);
@@ -224,7 +246,7 @@ export class DiagnosticTestRunner {
     metric: (b: TelemetryFrame, a: TelemetryFrame) => number,
     pred: (d: number) => boolean,
     label: string,
-    machine: 'excavator' | 'bulldozer' = 'excavator',
+    machine: 'excavator' | 'bulldozer' | 'dumpTruck' = 'excavator',
   ) {
     const r = makeResult(id, name, `${label} satisfies predicate`);
     this.results.push(r);
@@ -232,7 +254,7 @@ export class DiagnosticTestRunner {
       // Ensure correct machine active
       const cur = snap();
       if (cur?.active !== machine) {
-        await tapKey(machine === 'excavator' ? 'Digit1' : 'Digit2');
+        await tapKey(machine === 'excavator' ? 'Digit1' : machine === 'bulldozer' ? 'Digit2' : 'Digit3');
         await wait(120);
       }
       const before = snap()!;
