@@ -63,12 +63,33 @@ export interface ControlInputs {
 
 const keyState: Record<string, boolean> = {};
 const justPressed: Record<string, boolean> = {};
+let controlsInitialized = false;
+
+const CONTROL_KEYS = new Set([
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space',
+  'KeyW', 'KeyS', 'KeyI', 'KeyK', 'KeyA', 'KeyD', 'KeyR', 'KeyF',
+  'KeyJ', 'KeyL', 'KeyQ', 'KeyE', 'KeyT', 'KeyG', 'KeyY', 'KeyH',
+  'KeyX', 'KeyV', 'KeyB', 'Digit1', 'Digit2', 'Digit3', 'Digit4',
+]);
+
+function keyCode(e: KeyboardEvent): string {
+  return e.code || e.key.toLowerCase();
+}
+
+function clearControls() {
+  for (const k of Object.keys(keyState)) keyState[k] = false;
+  for (const k of Object.keys(justPressed)) justPressed[k] = false;
+}
 
 export function initControls() {
+  if (controlsInitialized) return;
+  controlsInitialized = true;
+
   window.addEventListener('keydown', (e) => {
-    const k = e.code || e.key.toLowerCase();
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(k)) {
+    const k = keyCode(e);
+    if (CONTROL_KEYS.has(k)) {
       e.preventDefault();
+      e.stopPropagation();
     }
     if (!keyState[k]) {
       justPressed[k] = true;
@@ -77,11 +98,17 @@ export function initControls() {
   });
   
   window.addEventListener('keyup', (e) => {
-    const k = e.code || e.key.toLowerCase();
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(k)) {
+    const k = keyCode(e);
+    if (CONTROL_KEYS.has(k)) {
       e.preventDefault();
+      e.stopPropagation();
     }
     keyState[k] = false;
+  });
+
+  window.addEventListener('blur', clearControls);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clearControls();
   });
 }
 
@@ -140,19 +167,25 @@ export function pollControls(): ControlInputs {
   };
 }
 
-export function getExcavatorInputs(ctrl: ControlInputs) {
-  // Combine independent tracks + arrow keys
+function trackedDrive(ctrl: ControlInputs) {
   let leftTrack = (ctrl.leftTrackForward ? 1 : 0) + (ctrl.leftTrackBackward ? -1 : 0);
   let rightTrack = (ctrl.rightTrackForward ? 1 : 0) + (ctrl.rightTrackBackward ? -1 : 0);
-  
-  // Arrow keys: forward/back = both tracks, left/right = pivot
-  if (ctrl.bothForward) { leftTrack += 1; rightTrack += 1; }
-  if (ctrl.bothBackward) { leftTrack -= 1; rightTrack -= 1; }
-  if (ctrl.pivotLeft) { leftTrack -= 1; rightTrack += 1; }
-  if (ctrl.pivotRight) { leftTrack += 1; rightTrack -= 1; }
-  
-  leftTrack = Math.max(-1, Math.min(1, leftTrack));
-  rightTrack = Math.max(-1, Math.min(1, rightTrack));
+
+  const arrowDrive = (ctrl.bothForward ? 1 : 0) + (ctrl.bothBackward ? -1 : 0);
+  const arrowSteer = (ctrl.pivotLeft ? 1 : 0) + (ctrl.pivotRight ? -1 : 0);
+  if (arrowDrive !== 0 || arrowSteer !== 0) {
+    leftTrack += arrowDrive - arrowSteer * 0.72;
+    rightTrack += arrowDrive + arrowSteer * 0.72;
+  }
+
+  return {
+    leftTrack: Math.max(-1, Math.min(1, leftTrack)),
+    rightTrack: Math.max(-1, Math.min(1, rightTrack)),
+  };
+}
+
+export function getExcavatorInputs(ctrl: ControlInputs) {
+  const { leftTrack, rightTrack } = trackedDrive(ctrl);
   
   return {
     leftTrack,
@@ -165,16 +198,7 @@ export function getExcavatorInputs(ctrl: ControlInputs) {
 }
 
 export function getBulldozerInputs(ctrl: ControlInputs) {
-  let leftTrack = (ctrl.leftTrackForward ? 1 : 0) + (ctrl.leftTrackBackward ? -1 : 0);
-  let rightTrack = (ctrl.rightTrackForward ? 1 : 0) + (ctrl.rightTrackBackward ? -1 : 0);
-  
-  if (ctrl.bothForward) { leftTrack += 1; rightTrack += 1; }
-  if (ctrl.bothBackward) { leftTrack -= 1; rightTrack -= 1; }
-  if (ctrl.pivotLeft) { leftTrack -= 1; rightTrack += 1; }
-  if (ctrl.pivotRight) { leftTrack += 1; rightTrack -= 1; }
-  
-  leftTrack = Math.max(-1, Math.min(1, leftTrack));
-  rightTrack = Math.max(-1, Math.min(1, rightTrack));
+  const { leftTrack, rightTrack } = trackedDrive(ctrl);
   
   return {
     leftTrack,

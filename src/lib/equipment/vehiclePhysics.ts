@@ -342,8 +342,8 @@ export function updateVehiclePhysics(
   if (Math.abs(leftInput) < 0.05) drv.leftBrake = 0.18;
   if (Math.abs(rightInput) < 0.05) drv.rightBrake = 0.18;
 
-  const maxTrackSpeed = 0.24;
-  const driveGain = 0.055;
+  const maxTrackSpeed = 0.34;
+  const driveGain = 0.090;
   const brakeGain = 0.014;
   const cmdLeftV = drv.leftDriveTorque * driveGain - drv.leftBrake * Math.sign(drv.leftTrackVelocity || leftInput || 1) * brakeGain;
   const cmdRightV = drv.rightDriveTorque * driveGain - drv.rightBrake * Math.sign(drv.rightTrackVelocity || rightInput || 1) * brakeGain;
@@ -389,12 +389,20 @@ export function updateVehiclePhysics(
   const accel = netLongForce / Math.max(1, mass.mass * 2.4);
   physics.forwardVelocity += accel * dt_clamped;
 
-  const vMaxChassis = 0.22;
+  // Hydrostatic tracked machines follow commanded belt speed closely; the
+  // terramechanics above modulates slip/sinkage, but should never leave the
+  // chassis visually dead while the belts are spinning.
+  const commandedForward = (drv.leftTrackVelocity + drv.rightTrackVelocity) * 0.5;
+  const slipPenalty = Math.max(0.45, 1 - physics.shearMobilization * 0.35 - terrainSoftness * 0.18);
+  const targetForwardVelocity = commandedForward * slipPenalty;
+  physics.forwardVelocity += (targetForwardVelocity - physics.forwardVelocity) * Math.min(1, 9.5 * dt_clamped);
+
+  const vMaxChassis = 0.30;
   physics.forwardVelocity = Math.max(-vMaxChassis, Math.min(vMaxChassis, physics.forwardVelocity));
 
   const turnDiff = (drv.rightTrackVelocity - drv.leftTrackVelocity) / mass.trackGauge;
-  const targetAngVel = turnDiff * 0.68;
-  const angAccel = (targetAngVel - physics.angularVelocity) * 10;
+  const targetAngVel = turnDiff * 0.92;
+  const angAccel = (targetAngVel - physics.angularVelocity) * 14;
   physics.angularVelocity += angAccel * dt_clamped;
   physics.angularVelocity *= (1 - 2.4 * dt_clamped);
 
@@ -416,8 +424,8 @@ export function updateVehiclePhysics(
   // ── Track shoe travel + slack (for renderer) ──
   vehicle.tracks.leftSpeed = drv.leftTrackVelocity / maxTrackSpeed;
   vehicle.tracks.rightSpeed = drv.rightTrackVelocity / maxTrackSpeed;
-  vehicle.tracks.leftTravel += drv.leftTrackVelocity * dt_clamped * 6.5;
-  vehicle.tracks.rightTravel += drv.rightTrackVelocity * dt_clamped * 6.5;
+  vehicle.tracks.leftTravel += drv.leftTrackVelocity * dt_clamped * 13.0;
+  vehicle.tracks.rightTravel += drv.rightTrackVelocity * dt_clamped * 13.0;
   // Slack visualization: rises with slip mobilization
   const slackTarget = physics.isSlipping ? Math.min(1, physics.shearMobilization * 1.2) : 0;
   vehicle.tracks.slack += (slackTarget - vehicle.tracks.slack) * Math.min(1, 5 * dt_clamped);

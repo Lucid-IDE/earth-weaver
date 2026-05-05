@@ -64,18 +64,18 @@ export function updateDumpTruck(
   const targetSteer = inputs.steer * 28 * DEG;
   state.steeringAngle += (targetSteer - state.steeringAngle) * Math.min(1, 7 * cdt);
 
-  const massFactor = 1 + state.bedLoad * 1.65;
+  const massFactor = 1 + state.bedLoad * 1.25;
   const pressureFactor = Math.max(0.62, Math.min(1.35, state.tirePressurePsi / 72));
   const tractionLimit = 0.82 + pressureFactor * 0.12;
-  const rollingResistance = (0.08 + (1 / pressureFactor) * 0.05 + state.bedLoad * 0.07) * Math.sign(v.speed || state.throttle || 1);
-  const engineForce = state.throttle * 0.58 * tractionLimit;
-  const brakeDrag = Math.abs(state.throttle) < 0.04 ? v.speed * 1.8 : rollingResistance * 0.35;
+  const rollingResistance = (0.045 + (1 / pressureFactor) * 0.025 + state.bedLoad * 0.035) * Math.sign(v.speed || state.throttle || 1);
+  const engineForce = state.throttle * 1.65 * tractionLimit;
+  const brakeDrag = Math.abs(state.throttle) < 0.04 ? v.speed * 2.1 : rollingResistance * 0.22;
   const accel = (engineForce - brakeDrag) / massFactor;
   v.speed += accel * cdt;
-  v.speed *= 1 - Math.min(0.08, (0.018 + state.bedLoad * 0.012) * cdt);
-  v.speed = Math.max(-0.32, Math.min(0.38, v.speed));
+  v.speed *= 1 - Math.min(0.08, (0.020 + state.bedLoad * 0.010) * cdt);
+  v.speed = Math.max(-0.50, Math.min(0.58, v.speed));
 
-  const wheelbase = 0.26;
+  const wheelbase = 0.23;
   const turnRate = Math.abs(state.steeringAngle) > 0.001
     ? Math.tan(state.steeringAngle) * v.speed / wheelbase
     : 0;
@@ -103,7 +103,7 @@ export function updateDumpTruck(
     state.suspensionCompression[i] += (state.tireDeflection[i] * 1.7 - state.suspensionCompression[i]) * Math.min(1, 6 * cdt);
   }
 
-  v.tracks.leftSpeed = v.speed / 0.38;
+  v.tracks.leftSpeed = v.speed / 0.58;
   v.tracks.rightSpeed = v.tracks.leftSpeed;
   v.tracks.leftTravel = state.wheelRotation;
   v.tracks.rightTravel = state.wheelRotation;
