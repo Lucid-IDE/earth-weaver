@@ -462,6 +462,12 @@ function EquipmentController({
     if (ctrl.switchToBulldozer) es.activeEquipment = 'bulldozer';
     if (ctrl.switchToDumpTruck) es.activeEquipment = 'dumpTruck';
     if (ctrl.switchToFreeCamera) es.activeEquipment = 'none';
+    if (es.activeEquipment === 'none' && (
+      ctrl.bothForward || ctrl.bothBackward || ctrl.pivotLeft || ctrl.pivotRight ||
+      ctrl.leftTrackForward || ctrl.leftTrackBackward || ctrl.rightTrackForward || ctrl.rightTrackBackward
+    )) {
+      es.activeEquipment = 'excavator';
+    }
     
     const clampedDt = Math.min(dt, 0.033);
 
