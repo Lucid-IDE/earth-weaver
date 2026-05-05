@@ -1002,7 +1002,7 @@ function RubberTire({ radius, width, deflection, rotation, steer = 0 }: {
           );
         })}
       </group>
-      <mesh rotation={[0, Math.PI / 2, 0]}>
+      <mesh rotation={[0, 0, Math.PI / 2]}>
         <cylinderGeometry args={[radius * 0.42, radius * 0.42, width * 1.08, 16]} />
         <meshStandardMaterial color={COLORS.medSteel} metalness={0.75} roughness={0.32} />
       </mesh>
