@@ -987,7 +987,7 @@ function RubberTire({ radius, width, deflection, rotation, steer = 0 }: {
   const bulge = 1 + deflection * 5.5;
   return (
     <group rotation={[0, steer, 0]}>
-      <group rotation={[Math.PI / 2, 0, rotation]} scale={[bulge, squash, bulge]}>
+      <group rotation={[0, 0, rotation]} scale={[bulge, squash, 1 + deflection * 2.2]}>
         <mesh>
           <torusGeometry args={[radius, width * 0.34, 12, 28]} />
           <meshStandardMaterial color={COLORS.rubber} metalness={0.05} roughness={0.92} />
@@ -1002,7 +1002,7 @@ function RubberTire({ radius, width, deflection, rotation, steer = 0 }: {
           );
         })}
       </group>
-      <mesh rotation={[Math.PI / 2, 0, 0]}>
+      <mesh rotation={[0, Math.PI / 2, 0]}>
         <cylinderGeometry args={[radius * 0.42, radius * 0.42, width * 1.08, 16]} />
         <meshStandardMaterial color={COLORS.medSteel} metalness={0.75} roughness={0.32} />
       </mesh>
