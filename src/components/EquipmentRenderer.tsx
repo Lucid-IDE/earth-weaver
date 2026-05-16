@@ -593,7 +593,7 @@ export function ExcavatorMesh({
       </mesh>
 
       {/* ── Superstructure (rotates with swing) ── */}
-      <group rotation={[0, state.swing.angle, 0]}>
+      <group ref={swingRef}>
         {/* Main deck plate */}
         <BoxAt pos={[0, 0.015, -0.005]} size={[0.07, 0.01, 0.08]} color={COLORS.catYellow} />
 
