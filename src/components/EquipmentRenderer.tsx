@@ -562,8 +562,18 @@ export function ExcavatorMesh({
   const tl = 0.16;         // track length
   const th = 0.028;        // track height
 
+  const rootRef = useRef<THREE.Group>(null!);
+  const swingRef = useRef<THREE.Group>(null!);
+  useFrame(() => {
+    if (rootRef.current) {
+      rootRef.current.position.set(v.posX, v.posY, v.posZ);
+      rootRef.current.rotation.set(v.pitch, v.heading, 0);
+    }
+    if (swingRef.current) swingRef.current.rotation.y = state.swing.angle;
+  });
+
   return (
-    <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
+    <group ref={rootRef}>
       {/* ── Undercarriage ── */}
       <TrackAssembly side={-1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={5} numPads={24}
         travel={v.tracks.leftTravel} slack={v.tracks.slack} />
