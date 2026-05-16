@@ -61,8 +61,13 @@ export function updateDumpTruck(
   const targetRpm = 750 + Math.abs(state.throttle) * 1450 + state.bedLoad * 120;
   state.engineRpm += (targetRpm - state.engineRpm) * Math.min(1, 4 * cdt);
 
-  const targetSteer = inputs.steer * 28 * DEG;
-  state.steeringAngle += (targetSteer - state.steeringAngle) * Math.min(1, 7 * cdt);
+  // Articulated steering: front tractor bends at center hinge.
+  // Hydraulic ram has visible latency — real 460 articulates ±45° at ~12°/s.
+  const targetSteer = inputs.steer * 42 * DEG;
+  const hydSpeed = 0.30; // rad/s, hydraulic ram speed
+  const delta = targetSteer - state.steeringAngle;
+  const maxStep = hydSpeed * cdt;
+  state.steeringAngle += Math.max(-maxStep, Math.min(maxStep, delta));
 
   const massFactor = 1 + state.bedLoad * 1.25;
   const pressureFactor = Math.max(0.62, Math.min(1.35, state.tirePressurePsi / 72));

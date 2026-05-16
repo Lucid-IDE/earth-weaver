@@ -562,8 +562,18 @@ export function ExcavatorMesh({
   const tl = 0.16;         // track length
   const th = 0.028;        // track height
 
+  const rootRef = useRef<THREE.Group>(null!);
+  const swingRef = useRef<THREE.Group>(null!);
+  useFrame(() => {
+    if (rootRef.current) {
+      rootRef.current.position.set(v.posX, v.posY, v.posZ);
+      rootRef.current.rotation.set(v.pitch, v.heading, 0);
+    }
+    if (swingRef.current) swingRef.current.rotation.y = state.swing.angle;
+  });
+
   return (
-    <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
+    <group ref={rootRef}>
       {/* ── Undercarriage ── */}
       <TrackAssembly side={-1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={5} numPads={24}
         travel={v.tracks.leftTravel} slack={v.tracks.slack} />
@@ -583,7 +593,7 @@ export function ExcavatorMesh({
       </mesh>
 
       {/* ── Superstructure (rotates with swing) ── */}
-      <group rotation={[0, state.swing.angle, 0]}>
+      <group ref={swingRef}>
         {/* Main deck plate */}
         <BoxAt pos={[0, 0.015, -0.005]} size={[0.07, 0.01, 0.08]} color={COLORS.catYellow} />
 
@@ -752,8 +762,16 @@ export function BulldozerMesh({
   const bladeH = 0.065;
   const bladeZ = 0.10; // forward from center
 
+  const rootRef = useRef<THREE.Group>(null!);
+  useFrame(() => {
+    if (rootRef.current) {
+      rootRef.current.position.set(v.posX, v.posY, v.posZ);
+      rootRef.current.rotation.set(v.pitch, v.heading, 0);
+    }
+  });
+
   return (
-    <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
+    <group ref={rootRef}>
       {/* ── Undercarriage ── */}
       <TrackAssembly side={-1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={7} numPads={32}
         travel={v.tracks.leftTravel} slack={v.tracks.slack} />
@@ -980,80 +998,435 @@ export function BulldozerMesh({
   );
 }
 
-function RubberTire({ radius, width, deflection, rotation, steer = 0 }: {
-  radius: number; width: number; deflection: number; rotation: number; steer?: number;
+// ── John Deere 460 P-Tier — Articulated Dump Truck ─────────────────
+// Real 460 P-Tier: 6×6 articulated, ~410 kW Cummins, 41-ton payload,
+// articulation at center hinge (±45°), front 1× axle + rear 2× bogie.
+
+const TRUCK_COLORS = {
+  jdYellow: '#f2c200',        // John Deere construction yellow
+  jdYellowDeep: '#d4a000',
+  jdGreen: '#1a3a1f',         // dark green accents
+  steelGrey: '#4a4a4a',
+  darkGrey: '#2a2a2a',
+  rubber: '#0e0e0e',
+  treadFace: '#181818',
+  rim: '#e6b400',             // yellow rim
+  hub: '#1a1a1a',
+  glass: '#3a7799',
+  chrome: '#bcbcbc',
+  hyd: '#5a5a5a',
+  rod: '#c8c8d0',
+  underframe: '#222',
+};
+
+function HeavyDutyTire({
+  radius, width, deflection, rotation,
+}: {
+  radius: number; width: number; deflection: number; rotation: number;
 }) {
-  const squash = Math.max(0.68, 1 - deflection * 9);
-  const bulge = 1 + deflection * 5.5;
+  // Tire deforms vertically (squash) and bulges sideways under load.
+  // Geometry note: the carcass is a torus with its axis along the wheel
+  // spindle (group rotation places spindle on X). The tire spins on its
+  // local Z axis -> we rotate the torus group by `rotation` on Z.
+  const squash = Math.max(0.62, 1 - deflection * 11);
+  const bulge = 1 + deflection * 5.0;
+  const treadCount = 22;
+  const lugLen = width * 0.42;
   return (
-    <group rotation={[0, steer, 0]}>
-      <group rotation={[0, Math.PI / 2, rotation]} scale={[bulge, squash, 1 + deflection * 2.2]}>
+    <group rotation={[0, 0, Math.PI / 2]}>
+      {/* Tire carcass — spindle is local X (post-rotation), spins on Z */}
+      <group rotation={[0, 0, rotation]} scale={[bulge, squash, 1 + deflection * 2.0]}>
+        {/* Inner sidewall + tread band */}
         <mesh>
-          <torusGeometry args={[radius, width * 0.34, 12, 28]} />
-          <meshStandardMaterial color={COLORS.rubber} metalness={0.05} roughness={0.92} />
+          <torusGeometry args={[radius, width * 0.42, 16, 32]} />
+          <meshStandardMaterial color={TRUCK_COLORS.rubber} metalness={0.05} roughness={0.95} />
         </mesh>
-        {Array.from({ length: 18 }).map((_, i) => {
-          const a = (i / 18) * Math.PI * 2;
+        {/* Outer tread face ring (slightly larger radius, darker) */}
+        <mesh>
+          <torusGeometry args={[radius * 1.005, width * 0.30, 8, 32]} />
+          <meshStandardMaterial color={TRUCK_COLORS.treadFace} metalness={0.05} roughness={0.98} />
+        </mesh>
+        {/* Aggressive directional tread lugs (chevron-like) */}
+        {Array.from({ length: treadCount }).map((_, i) => {
+          const a = (i / treadCount) * Math.PI * 2;
+          const ca = Math.cos(a), sa = Math.sin(a);
+          const r = radius + width * 0.08;
           return (
-            <mesh key={i} position={[Math.cos(a) * radius, Math.sin(a) * radius, 0]} rotation={[0, 0, a]}>
-              <boxGeometry args={[0.0045, 0.012, width * 0.95]} />
-              <meshStandardMaterial color={COLORS.darkSteel} metalness={0.05} roughness={0.95} />
+            <group key={i} position={[ca * r, sa * r, 0]} rotation={[0, 0, a]}>
+              {/* Left lug (angled out) */}
+              <mesh position={[0, 0, lugLen * 0.45]} rotation={[0.42, 0, 0]}>
+                <boxGeometry args={[width * 0.18, width * 0.12, lugLen]} />
+                <meshStandardMaterial color={TRUCK_COLORS.darkGrey} metalness={0.05} roughness={0.92} />
+              </mesh>
+              {/* Right lug (mirror) */}
+              <mesh position={[0, 0, -lugLen * 0.45]} rotation={[-0.42, 0, 0]}>
+                <boxGeometry args={[width * 0.18, width * 0.12, lugLen]} />
+                <meshStandardMaterial color={TRUCK_COLORS.darkGrey} metalness={0.05} roughness={0.92} />
+              </mesh>
+              {/* Center sipe */}
+              <mesh position={[0, 0, 0]}>
+                <boxGeometry args={[width * 0.10, width * 0.08, lugLen * 1.05]} />
+                <meshStandardMaterial color={TRUCK_COLORS.darkGrey} metalness={0.05} roughness={0.92} />
+              </mesh>
+            </group>
+          );
+        })}
+        {/* Sidewall ribs (subtle) */}
+        {Array.from({ length: 8 }).map((_, i) => {
+          const a = (i / 8) * Math.PI * 2;
+          return (
+            <mesh key={`sw${i}`} position={[Math.cos(a) * radius * 0.85, Math.sin(a) * radius * 0.85, width * 0.35]} rotation={[0, 0, a]}>
+              <boxGeometry args={[radius * 0.05, 0.0008, 0.0015]} />
+              <meshStandardMaterial color={TRUCK_COLORS.darkGrey} roughness={0.9} />
             </mesh>
           );
         })}
       </group>
-      <mesh rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[radius * 0.42, radius * 0.42, width * 1.08, 16]} />
-        <meshStandardMaterial color={COLORS.medSteel} metalness={0.75} roughness={0.32} />
+      {/* Yellow rim + hub (do NOT spin visually — keep static for clarity) */}
+      <mesh>
+        <cylinderGeometry args={[radius * 0.55, radius * 0.55, width * 0.55, 18]} />
+        <meshStandardMaterial color={TRUCK_COLORS.rim} metalness={0.35} roughness={0.55} />
       </mesh>
+      <mesh>
+        <cylinderGeometry args={[radius * 0.18, radius * 0.18, width * 0.62, 12]} />
+        <meshStandardMaterial color={TRUCK_COLORS.hub} metalness={0.7} roughness={0.4} />
+      </mesh>
+      {/* Lug nuts */}
+      {Array.from({ length: 10 }).map((_, i) => {
+        const a = (i / 10) * Math.PI * 2;
+        return (
+          <mesh key={`ln${i}`} position={[0, Math.cos(a) * radius * 0.36, Math.sin(a) * radius * 0.36]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[radius * 0.04, radius * 0.04, width * 0.62, 6]} />
+            <meshStandardMaterial color={TRUCK_COLORS.darkGrey} metalness={0.6} roughness={0.4} />
+          </mesh>
+        );
+      })}
     </group>
   );
 }
 
 export function DumpTruckMesh({ state, exhaustIntensity = 0 }: { state: DumpTruckState; exhaustIntensity?: number }) {
   const v = state.vehicle;
-  const bedLift = Math.sin(state.bedAngle) * 0.05;
-  const payloadY = 0.073 + bedLift * 0.55;
+
+  // ── Live per-frame transforms ──
+  const rootRef = useRef<THREE.Group>(null!);
+  const frontRef = useRef<THREE.Group>(null!);     // articulated front tractor
+  const bedRef = useRef<THREE.Group>(null!);       // dump body tilt
+  const tailgateRef = useRef<THREE.Group>(null!);
+  const wheelRefs = useRef<(THREE.Group | null)[]>([null, null, null, null, null, null]);
+  const hingeRamLeftRef = useRef<THREE.Group>(null!);
+  const hingeRamRightRef = useRef<THREE.Group>(null!);
+
+  useFrame(() => {
+    if (rootRef.current) {
+      rootRef.current.position.set(v.posX, v.posY, v.posZ);
+      rootRef.current.rotation.set(v.pitch, v.heading, 0);
+    }
+    // Articulation: front tractor pivots around hinge (at z = +0.0)
+    // The whole front section yaws by state.steeringAngle around the hinge.
+    if (frontRef.current) {
+      frontRef.current.rotation.y = state.steeringAngle;
+    }
+    if (bedRef.current) bedRef.current.rotation.x = state.bedAngle;
+    if (tailgateRef.current) {
+      tailgateRef.current.rotation.x = state.tailgateOpen ? -1.05 : 0;
+    }
+    // Wheel rotation (spin)
+    for (let i = 0; i < 6; i++) {
+      const w = wheelRefs.current[i];
+      if (w) w.rotation.x = state.wheelRotation;
+    }
+  });
+
+  // Geometry constants — proportions match 460 P-Tier reference photo.
+  const tireR = 0.038;
+  const tireW = 0.028;
+  const hingeZ = 0.0;           // articulation hinge at world-local origin
+  const frontAxleZ = 0.14;      // front axle distance ahead of hinge
+  const rearAxle1Z = -0.12;     // first rear axle behind hinge
+  const rearAxle2Z = -0.20;     // second rear axle (rear bogie)
+  const halfTrack = 0.075;      // wheel half-spacing
+
+  // Suspension Y (negative = compressed). Indices: 0 FL, 1 FR, 2 M-L, 3 M-R, 4 R-L, 5 R-R
+  // Use first 2 entries of state.suspensionCompression for front, blend for rear bogie.
+  const sFL = -state.suspensionCompression[0];
+  const sFR = -state.suspensionCompression[1];
+  const sRL = -state.suspensionCompression[2];
+  const sRR = -state.suspensionCompression[3];
+
+  const dFront = (state.tireDeflection[0] + state.tireDeflection[1]) * 0.5;
+  const dRear = (state.tireDeflection[2] + state.tireDeflection[3]) * 0.5;
+
+  // Hinge ram length: extends/retracts based on articulation angle
+  const ramExtend = state.steeringAngle * 0.025;
 
   return (
-    <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
-      <BoxAt pos={[0, 0.032, -0.025]} size={[0.14, 0.018, 0.24]} color={COLORS.darkSteel} />
-      <BoxAt pos={[0, 0.052, 0.075]} size={[0.105, 0.055, 0.095]} color={COLORS.catYellow} />
-      <BoxAt pos={[0, 0.078, 0.112]} size={[0.09, 0.036, 0.03]} color={COLORS.glass} metalness={0.1} roughness={0.05} />
-      <BoxAt pos={[-0.055, 0.076, 0.075]} size={[0.003, 0.032, 0.052]} color={COLORS.glass} metalness={0.1} roughness={0.05} />
-      <BoxAt pos={[0.055, 0.076, 0.075]} size={[0.003, 0.032, 0.052]} color={COLORS.glass} metalness={0.1} roughness={0.05} />
-      <BoxAt pos={[0, 0.05, 0.145]} size={[0.11, 0.038, 0.035]} color={COLORS.catYellow} />
-      <BoxAt pos={[0, 0.06, 0.165]} size={[0.095, 0.026, 0.004]} color={COLORS.darkSteel} />
-      <mesh position={[0.046, 0.095, 0.03]}>
-        <cylinderGeometry args={[0.004, 0.004, 0.06, 8]} />
-        <meshStandardMaterial color={COLORS.exhaust} metalness={0.6} roughness={0.45} />
-      </mesh>
-      <ExhaustSmoke origin={[0.046, 0.13, 0.03]} intensity={exhaustIntensity} />
+    <group ref={rootRef}>
+      {/* ═══════════ REAR SECTION (dump body chassis) ═══════════ */}
+      <group position={[0, 0, 0]}>
+        {/* Rear chassis longerons */}
+        <mesh position={[0, tireR + 0.005, -0.16]}>
+          <boxGeometry args={[0.135, 0.020, 0.22]} />
+          <meshStandardMaterial color={TRUCK_COLORS.underframe} metalness={0.6} roughness={0.55} />
+        </mesh>
+        {/* Subframe yellow strip */}
+        <mesh position={[0, tireR + 0.018, -0.16]}>
+          <boxGeometry args={[0.14, 0.008, 0.215]} />
+          <meshStandardMaterial color={TRUCK_COLORS.jdYellow} metalness={0.35} roughness={0.55} />
+        </mesh>
 
-      <group position={[0, 0.065, -0.075]} rotation={[state.bedAngle, 0, 0]}>
-        <BoxAt pos={[0, 0, 0]} size={[0.135, 0.012, 0.19]} color={COLORS.catYellowDark} />
-        <BoxAt pos={[-0.071, 0.026, 0]} size={[0.006, 0.06, 0.19]} color={COLORS.catYellow} />
-        <BoxAt pos={[0.071, 0.026, 0]} size={[0.006, 0.06, 0.19]} color={COLORS.catYellow} />
-        <BoxAt pos={[0, 0.026, -0.096]} size={[0.135, 0.06, 0.006]} color={state.tailgateOpen ? COLORS.medSteel : COLORS.catYellow} rotation={[state.tailgateOpen ? -0.9 : 0, 0, 0]} />
-        {state.bedLoad > 0.02 && (
-          <mesh position={[0, payloadY - 0.065, -0.005]}>
-            <boxGeometry args={[0.118, 0.036 * state.bedLoad, 0.15]} />
-            <meshStandardMaterial color="#6b5a3d" metalness={0.04} roughness={0.96} />
-          </mesh>
-        )}
-      </group>
-      <HydraulicCylinder start={[0, 0.043, -0.02]} end={[0, 0.066 + bedLift, -0.105]} bodyRadius={0.005} rodRadius={0.003} pressure={state.bedAngle > 0.02 ? 0.85 : 0.2} />
-
-      {[
-        [-0.068, 0.014 - state.suspensionCompression[0], 0.095, true, 0],
-        [0.068, 0.014 - state.suspensionCompression[1], 0.095, true, 1],
-        [-0.068, 0.014 - state.suspensionCompression[2], -0.095, false, 2],
-        [0.068, 0.014 - state.suspensionCompression[3], -0.095, false, 3],
-      ].map(([x, y, z, front, idx]) => (
-        <group key={idx as number} position={[x as number, y as number, z as number]}>
-          <RubberTire radius={0.032} width={0.026} deflection={state.tireDeflection[idx as number]} rotation={state.wheelRotation} steer={front ? state.steeringAngle : 0} />
+        {/* Dump body (pivots at rear pivot point near tailgate) */}
+        <group position={[0, tireR + 0.03, -0.18]}>
+          <group ref={bedRef} position={[0, 0, 0.10]}>
+            <group position={[0, 0, -0.10]}>
+              {/* Floor */}
+              <mesh position={[0, 0.005, 0]}>
+                <boxGeometry args={[0.155, 0.010, 0.26]} />
+                <meshStandardMaterial color={TRUCK_COLORS.jdYellowDeep} metalness={0.4} roughness={0.5} />
+              </mesh>
+              {/* Side walls (sloped outward at top — classic ADT) */}
+              <mesh position={[-0.080, 0.045, 0]} rotation={[0, 0, -0.18]}>
+                <boxGeometry args={[0.008, 0.085, 0.26]} />
+                <meshStandardMaterial color={TRUCK_COLORS.jdYellow} metalness={0.35} roughness={0.55} />
+              </mesh>
+              <mesh position={[0.080, 0.045, 0]} rotation={[0, 0, 0.18]}>
+                <boxGeometry args={[0.008, 0.085, 0.26]} />
+                <meshStandardMaterial color={TRUCK_COLORS.jdYellow} metalness={0.35} roughness={0.55} />
+              </mesh>
+              {/* Front headboard (high cab guard) */}
+              <mesh position={[0, 0.065, 0.130]}>
+                <boxGeometry args={[0.165, 0.13, 0.010]} />
+                <meshStandardMaterial color={TRUCK_COLORS.jdYellow} metalness={0.35} roughness={0.55} />
+              </mesh>
+              {/* John Deere logo plate on headboard back */}
+              <mesh position={[0, 0.08, 0.136]}>
+                <boxGeometry args={[0.045, 0.022, 0.001]} />
+                <meshStandardMaterial color={TRUCK_COLORS.jdGreen} metalness={0.3} roughness={0.6} />
+              </mesh>
+              {/* Tailgate (hinged at top of rear) */}
+              <group position={[0, 0.085, -0.13]} ref={tailgateRef}>
+                <mesh position={[0, -0.045, 0]}>
+                  <boxGeometry args={[0.155, 0.09, 0.008]} />
+                  <meshStandardMaterial color={TRUCK_COLORS.jdYellow} metalness={0.35} roughness={0.55} />
+                </mesh>
+              </group>
+              {/* Payload */}
+              {state.bedLoad > 0.02 && (
+                <mesh position={[0, 0.025 + state.bedLoad * 0.025, 0]}>
+                  <boxGeometry args={[0.135, 0.012 + state.bedLoad * 0.050, 0.22]} />
+                  <meshStandardMaterial color="#6b5a3d" roughness={0.96} />
+                </mesh>
+              )}
+            </group>
+          </group>
         </group>
-      ))}
+
+        {/* Hoist hydraulics (two big rams under bed front) */}
+        <HydraulicCylinder
+          start={[-0.030, tireR + 0.025, -0.05]}
+          end={[-0.030, tireR + 0.045 + Math.sin(state.bedAngle) * 0.04, -0.18]}
+          bodyRadius={0.006} rodRadius={0.004}
+          pressure={state.bedAngle > 0.02 ? 0.9 : 0.15}
+        />
+        <HydraulicCylinder
+          start={[0.030, tireR + 0.025, -0.05]}
+          end={[0.030, tireR + 0.045 + Math.sin(state.bedAngle) * 0.04, -0.18]}
+          bodyRadius={0.006} rodRadius={0.004}
+          pressure={state.bedAngle > 0.02 ? 0.9 : 0.15}
+        />
+
+        {/* Rear bogie axles (twin) */}
+        <mesh position={[0, tireR * 0.55, rearAxle1Z]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.012, 0.012, halfTrack * 2.15, 12]} />
+          <meshStandardMaterial color={TRUCK_COLORS.steelGrey} metalness={0.7} roughness={0.45} />
+        </mesh>
+        <mesh position={[0, tireR * 0.55, rearAxle2Z]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.012, 0.012, halfTrack * 2.15, 12]} />
+          <meshStandardMaterial color={TRUCK_COLORS.steelGrey} metalness={0.7} roughness={0.45} />
+        </mesh>
+
+        {/* Rear wheels: 4 (two on each side, twin bogie) */}
+        {([
+          [-halfTrack, sRL, rearAxle1Z, 2],
+          [ halfTrack, sRR, rearAxle1Z, 3],
+          [-halfTrack, sRL, rearAxle2Z, 4],
+          [ halfTrack, sRR, rearAxle2Z, 5],
+        ] as const).map(([x, dy, z, idx]) => (
+          <group key={`rw${idx}`}
+            ref={(g) => { wheelRefs.current[idx] = g; }}
+            position={[x, tireR * 0.55 + dy, z]}
+          >
+            <HeavyDutyTire radius={tireR} width={tireW} deflection={dRear} rotation={state.wheelRotation} />
+          </group>
+        ))}
+      </group>
+
+      {/* ═══════════ HINGE — Articulation joint ═══════════ */}
+      {/* Vertical pivot pin between rear chassis and front tractor */}
+      <mesh position={[0, tireR + 0.025, hingeZ]}>
+        <cylinderGeometry args={[0.014, 0.014, 0.07, 12]} />
+        <meshStandardMaterial color={TRUCK_COLORS.darkGrey} metalness={0.75} roughness={0.35} />
+      </mesh>
+      {/* Hinge plate */}
+      <mesh position={[0, tireR + 0.012, hingeZ]}>
+        <boxGeometry args={[0.085, 0.012, 0.045]} />
+        <meshStandardMaterial color={TRUCK_COLORS.steelGrey} metalness={0.7} roughness={0.45} />
+      </mesh>
+
+      {/* Steering hydraulic rams (cross from rear to front, one each side).
+          These visibly extend/retract as articulation changes. */}
+      <group>
+        {/* Left ram: rear-left to front-right via crossover */}
+        <HydraulicCylinder
+          start={[-0.045, tireR + 0.015, -0.035]}
+          end={[
+            -0.025 + Math.sin(state.steeringAngle) * 0.06 + ramExtend,
+            tireR + 0.015,
+            0.05 + Math.cos(state.steeringAngle) * 0.005,
+          ]}
+          bodyRadius={0.006} rodRadius={0.004}
+          pressure={Math.abs(state.steeringAngle) > 0.03 ? 0.85 : 0.25}
+        />
+        <HydraulicCylinder
+          start={[0.045, tireR + 0.015, -0.035]}
+          end={[
+            0.025 + Math.sin(state.steeringAngle) * 0.06 - ramExtend,
+            tireR + 0.015,
+            0.05 + Math.cos(state.steeringAngle) * 0.005,
+          ]}
+          bodyRadius={0.006} rodRadius={0.004}
+          pressure={Math.abs(state.steeringAngle) > 0.03 ? 0.85 : 0.25}
+        />
+      </group>
+
+      {/* ═══════════ FRONT SECTION (tractor / cab) — articulates ═══════════ */}
+      <group ref={frontRef} position={[0, 0, hingeZ]}>
+        {/* Front chassis main beam */}
+        <mesh position={[0, tireR + 0.005, 0.10]}>
+          <boxGeometry args={[0.105, 0.022, 0.20]} />
+          <meshStandardMaterial color={TRUCK_COLORS.underframe} metalness={0.6} roughness={0.55} />
+        </mesh>
+        {/* Yellow side fender skirt */}
+        <mesh position={[0, tireR + 0.028, 0.10]}>
+          <boxGeometry args={[0.155, 0.015, 0.21]} />
+          <meshStandardMaterial color={TRUCK_COLORS.jdYellow} metalness={0.35} roughness={0.55} />
+        </mesh>
+
+        {/* Engine hood (sloped — flat top, sloped front) */}
+        <mesh position={[0, tireR + 0.060, 0.180]}>
+          <boxGeometry args={[0.12, 0.060, 0.085]} />
+          <meshStandardMaterial color={TRUCK_COLORS.jdYellow} metalness={0.35} roughness={0.55} />
+        </mesh>
+        {/* Hood front grille area (dark plastic) */}
+        <mesh position={[0, tireR + 0.040, 0.225]}>
+          <boxGeometry args={[0.10, 0.038, 0.005]} />
+          <meshStandardMaterial color={TRUCK_COLORS.darkGrey} metalness={0.5} roughness={0.55} />
+        </mesh>
+        {/* Radiator grille bars */}
+        {Array.from({ length: 5 }).map((_, i) => (
+          <mesh key={`gb${i}`} position={[0, tireR + 0.025 + i * 0.008, 0.228]}>
+            <boxGeometry args={[0.092, 0.0025, 0.003]} />
+            <meshStandardMaterial color={TRUCK_COLORS.chrome} metalness={0.75} roughness={0.3} />
+          </mesh>
+        ))}
+        {/* Headlights */}
+        <mesh position={[-0.045, tireR + 0.058, 0.227]}>
+          <boxGeometry args={[0.018, 0.014, 0.004]} />
+          <meshStandardMaterial color="#ffefb0" emissive="#ffd770" emissiveIntensity={0.4} metalness={0.4} roughness={0.2} />
+        </mesh>
+        <mesh position={[0.045, tireR + 0.058, 0.227]}>
+          <boxGeometry args={[0.018, 0.014, 0.004]} />
+          <meshStandardMaterial color="#ffefb0" emissive="#ffd770" emissiveIntensity={0.4} metalness={0.4} roughness={0.2} />
+        </mesh>
+        {/* "DEERE 460" plate */}
+        <mesh position={[0, tireR + 0.080, 0.225]}>
+          <boxGeometry args={[0.06, 0.012, 0.002]} />
+          <meshStandardMaterial color={TRUCK_COLORS.jdGreen} roughness={0.55} />
+        </mesh>
+
+        {/* Cab body */}
+        <mesh position={[0, tireR + 0.085, 0.075]}>
+          <boxGeometry args={[0.115, 0.080, 0.090]} />
+          <meshStandardMaterial color={TRUCK_COLORS.jdYellow} metalness={0.35} roughness={0.55} />
+        </mesh>
+        {/* Cab roof */}
+        <mesh position={[0, tireR + 0.130, 0.080]}>
+          <boxGeometry args={[0.122, 0.008, 0.095]} />
+          <meshStandardMaterial color={TRUCK_COLORS.jdYellowDeep} metalness={0.35} roughness={0.55} />
+        </mesh>
+        {/* Windshield */}
+        <mesh position={[0, tireR + 0.105, 0.122]} rotation={[0.18, 0, 0]}>
+          <boxGeometry args={[0.095, 0.045, 0.003]} />
+          <meshStandardMaterial color={TRUCK_COLORS.glass} metalness={0.2} roughness={0.05} transparent opacity={0.78} />
+        </mesh>
+        {/* Side windows */}
+        <mesh position={[-0.060, 0.10 + tireR, 0.078]}>
+          <boxGeometry args={[0.003, 0.044, 0.062]} />
+          <meshStandardMaterial color={TRUCK_COLORS.glass} metalness={0.2} roughness={0.05} transparent opacity={0.72} />
+        </mesh>
+        <mesh position={[0.060, 0.10 + tireR, 0.078]}>
+          <boxGeometry args={[0.003, 0.044, 0.062]} />
+          <meshStandardMaterial color={TRUCK_COLORS.glass} metalness={0.2} roughness={0.05} transparent opacity={0.72} />
+        </mesh>
+        {/* Rear window of cab */}
+        <mesh position={[0, tireR + 0.105, 0.030]}>
+          <boxGeometry args={[0.090, 0.045, 0.003]} />
+          <meshStandardMaterial color={TRUCK_COLORS.glass} metalness={0.2} roughness={0.05} transparent opacity={0.72} />
+        </mesh>
+        {/* Mirrors */}
+        {[-0.072, 0.072].map((x, i) => (
+          <group key={`mir${i}`}>
+            <mesh position={[x, tireR + 0.110, 0.118]}>
+              <boxGeometry args={[0.004, 0.002, 0.040]} />
+              <meshStandardMaterial color={TRUCK_COLORS.darkGrey} />
+            </mesh>
+            <mesh position={[x * 1.25, tireR + 0.105, 0.135]}>
+              <boxGeometry args={[0.016, 0.022, 0.004]} />
+              <meshStandardMaterial color={TRUCK_COLORS.darkGrey} metalness={0.4} roughness={0.5} />
+            </mesh>
+          </group>
+        ))}
+
+        {/* Exhaust stack (right rear of cab) */}
+        <mesh position={[0.052, tireR + 0.155, 0.045]}>
+          <cylinderGeometry args={[0.0048, 0.0048, 0.075, 10]} />
+          <meshStandardMaterial color={TRUCK_COLORS.darkGrey} metalness={0.65} roughness={0.45} />
+        </mesh>
+        <mesh position={[0.052, tireR + 0.196, 0.045]}>
+          <cylinderGeometry args={[0.0065, 0.0065, 0.004, 10]} />
+          <meshStandardMaterial color={TRUCK_COLORS.darkGrey} metalness={0.65} roughness={0.45} />
+        </mesh>
+        <ExhaustSmoke origin={[0.052, tireR + 0.210, 0.045]} intensity={exhaustIntensity} />
+
+        {/* Front axle */}
+        <mesh position={[0, tireR * 0.55, frontAxleZ]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.013, 0.013, halfTrack * 2.20, 12]} />
+          <meshStandardMaterial color={TRUCK_COLORS.steelGrey} metalness={0.7} roughness={0.45} />
+        </mesh>
+
+        {/* Front mudflaps */}
+        <mesh position={[-halfTrack, tireR + 0.005, frontAxleZ - 0.05]}>
+          <boxGeometry args={[0.005, 0.040, 0.025]} />
+          <meshStandardMaterial color={TRUCK_COLORS.darkGrey} roughness={0.9} />
+        </mesh>
+        <mesh position={[halfTrack, tireR + 0.005, frontAxleZ - 0.05]}>
+          <boxGeometry args={[0.005, 0.040, 0.025]} />
+          <meshStandardMaterial color={TRUCK_COLORS.darkGrey} roughness={0.9} />
+        </mesh>
+
+        {/* Front wheels (2) */}
+        {([
+          [-halfTrack, sFL, frontAxleZ, 0],
+          [ halfTrack, sFR, frontAxleZ, 1],
+        ] as const).map(([x, dy, z, idx]) => (
+          <group key={`fw${idx}`}
+            ref={(g) => { wheelRefs.current[idx] = g; }}
+            position={[x, tireR * 0.55 + dy, z]}
+          >
+            <HeavyDutyTire radius={tireR} width={tireW} deflection={dFront} rotation={state.wheelRotation} />
+          </group>
+        ))}
+      </group>
     </group>
   );
 }
