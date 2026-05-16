@@ -762,8 +762,16 @@ export function BulldozerMesh({
   const bladeH = 0.065;
   const bladeZ = 0.10; // forward from center
 
+  const rootRef = useRef<THREE.Group>(null!);
+  useFrame(() => {
+    if (rootRef.current) {
+      rootRef.current.position.set(v.posX, v.posY, v.posZ);
+      rootRef.current.rotation.set(v.pitch, v.heading, 0);
+    }
+  });
+
   return (
-    <group position={[v.posX, v.posY, v.posZ]} rotation={[v.pitch, v.heading, 0]}>
+    <group ref={rootRef}>
       {/* ── Undercarriage ── */}
       <TrackAssembly side={-1} gauge={gauge} shoeWidth={shoeWidth} trackLength={tl} trackHeight={th} numRollers={7} numPads={32}
         travel={v.tracks.leftTravel} slack={v.tracks.slack} />
